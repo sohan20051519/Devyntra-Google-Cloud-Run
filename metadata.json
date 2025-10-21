@@ -1,0 +1,5 @@
+{
+  "name": "Devyntra",
+  "description": "A modern, AI-powered CI/CD platform that seamlessly connects to your GitHub repositories to analyze, fix, and deploy your applications to the cloud with stunning animations and a user-friendly interface.",
+  "requestFramePermissions": []
+}
