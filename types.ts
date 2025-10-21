@@ -1,10 +1,20 @@
 
 export interface Repository {
-  id: string;
+  id: number;
   name: string;
-  owner: string;
-  url: string;
-  lastUpdate: string;
+  full_name: string;
+  owner: {
+    login: string;
+    id: number;
+  };
+  html_url: string;
+  description: string | null;
+  language: string | null;
+  updated_at: string;
+  private: boolean;
+  default_branch: string;
+  clone_url: string;
+  ssh_url: string;
 }
 
 export interface Deployment {

@@ -10,11 +10,14 @@ import DeploymentDetailsPage from './pages/DeploymentDetailsPage';
 import { Page, Deployment } from '../types';
 import { Icons } from './icons/Icons';
 
+import { AuthUser } from '../firebase/auth';
+
 interface DashboardProps {
   onLogout: () => void;
+  user: AuthUser;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
   const [activePage, setActivePage] = useState<Page>(Page.Overview);
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
