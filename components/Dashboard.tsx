@@ -10,31 +10,38 @@ import DeploymentDetailsPage from './pages/DeploymentDetailsPage';
 import { Page, Deployment } from '../types';
 import { Icons } from './icons/Icons';
 
-import { AuthUser } from '../firebase/auth';
-
 interface DashboardProps {
   onLogout: () => void;
-  user: AuthUser;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [activePage, setActivePage] = useState<Page>(Page.Overview);
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
+  const [logFilter, setLogFilter] = useState<string | null>(null);
 
   const handleViewDeploymentDetails = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
     setActivePage(Page.DeploymentDetails);
+    setLogFilter(null);
   };
 
   const handleBackToDeployments = () => {
     setSelectedDeployment(null);
     setActivePage(Page.Deployments);
+    setLogFilter(null);
+  };
+  
+  const handleViewLogs = (deployment: Deployment) => {
+    setLogFilter(deployment.repoName);
+    setActivePage(Page.Logs);
+    setSelectedDeployment(null);
   };
 
   const handleGoToPage = (page: Page) => {
     setActivePage(page);
     setSelectedDeployment(null);
+    setLogFilter(null); // Always clear filter on generic navigation
   };
 
   const renderContent = () => {
@@ -44,15 +51,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
       case Page.NewDeployment:
         return <NewDeploymentPage />;
       case Page.Deployments:
-        return <DeploymentsPage onViewDetails={handleViewDeploymentDetails} onNewDeployment={() => handleGoToPage(Page.NewDeployment)} />;
+        return <DeploymentsPage 
+          onViewDetails={handleViewDeploymentDetails} 
+          onNewDeployment={() => handleGoToPage(Page.NewDeployment)}
+          onViewLogs={handleViewLogs} 
+        />;
       case Page.DeploymentDetails:
         return selectedDeployment 
-          ? <DeploymentDetailsPage deployment={selectedDeployment} onBack={handleBackToDeployments} /> 
-          : <DeploymentsPage onViewDetails={handleViewDeploymentDetails} onNewDeployment={() => handleGoToPage(Page.NewDeployment)} />;
+          ? <DeploymentDetailsPage 
+              deployment={selectedDeployment} 
+              onBack={handleBackToDeployments}
+              onViewLogs={handleViewLogs}
+            /> 
+          : <DeploymentsPage 
+              onViewDetails={handleViewDeploymentDetails} 
+              onNewDeployment={() => handleGoToPage(Page.NewDeployment)}
+              onViewLogs={handleViewLogs}
+            />;
       case Page.DevAI:
         return <DevAIPage />;
       case Page.Logs:
-        return <LogsPage />;
+        return <LogsPage 
+          filterRepo={logFilter} 
+          onClearFilter={() => setLogFilter(null)} 
+        />;
       case Page.Settings:
         return <SettingsPage />;
       default:

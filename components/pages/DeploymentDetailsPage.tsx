@@ -37,7 +37,7 @@ const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string |
     </div>
 )
 
-const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; }> = ({ deployment, onBack }) => {
+const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onBack, onViewLogs }) => {
     return (
         <div className="flex flex-col h-full animate-fade-in-up">
             {/* Header */}
@@ -78,7 +78,10 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                       </Card>
 
                       <Card>
-                          <h2 className="text-xl font-medium text-on-surface mb-4">Activity Logs</h2>
+                          <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-medium text-on-surface">Activity Logs</h2>
+                            <Button variant="text" onClick={() => onViewLogs(deployment)}>View all logs <Icons.ArrowRight size={14} className="ml-1"/></Button>
+                          </div>
                           <div className="font-mono text-sm bg-inverse-surface text-inverse-on-surface rounded-lg p-4 overflow-x-auto">
                               {mockDeploymentLogs.map(log => (
                                   <div key={log.id} className="flex">

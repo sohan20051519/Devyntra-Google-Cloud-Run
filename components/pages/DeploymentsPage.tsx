@@ -14,6 +14,7 @@ const mockDeployments: Deployment[] = [
 interface DeploymentsPageProps {
   onViewDetails: (deployment: Deployment) => void;
   onNewDeployment: () => void;
+  onViewLogs: (deployment: Deployment) => void;
 }
 
 const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => {
@@ -30,7 +31,7 @@ const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => 
   }
 };
 
-const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; }> = ({ deployment, onViewDetails }) => (
+const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onViewDetails, onViewLogs }) => (
   <Card className="mb-4">
     <div className="flex justify-between items-start">
       <span className="font-medium text-on-surface">{deployment.repoName}</span>
@@ -52,12 +53,12 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
     </div>
     <div className="mt-4 pt-4 border-t border-outline/20 flex gap-2 justify-end">
         <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewDetails(deployment)}>Manage</Button>
-        <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewDetails(deployment)}>Logs</Button>
+        <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewLogs(deployment)}>Logs</Button>
     </div>
   </Card>
 );
 
-const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment }) => {
+const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs }) => {
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -73,7 +74,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
       <div className="flex-1 overflow-y-auto">
         {/* Mobile View: List of Cards */}
         <div className="md:hidden">
-          {mockDeployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} />)}
+          {mockDeployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
         </div>
 
         {/* Desktop View: Table */}
@@ -104,7 +105,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                   <td className="p-4">
                     <div className="flex gap-2">
                       <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Manage</Button>
-                      <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Logs</Button>
+                      <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewLogs(dep)}>Logs</Button>
                     </div>
                   </td>
                 </tr>

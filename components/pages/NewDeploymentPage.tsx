@@ -3,9 +3,12 @@ import { Repository } from '../../types';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
-import { fetchUserRepos, detectRepoLanguage, deployToCloudRun } from '../../firebase/functions';
 
-// Repository interface will be populated from Firebase
+const mockRepos: Repository[] = [
+  { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
+  { id: '2', name: 'web-app-v2', owner: 'john-doe', url: '', lastUpdate: '1 day ago' },
+  { id: '3', name: 'mobile-landing', owner: 'john-doe', url: '', lastUpdate: '3 days ago' },
+];
 
 type DeploymentStepStatus = 'pending' | 'in-progress' | 'success' | 'error';
 
@@ -55,124 +58,20 @@ const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> 
 
 
 const NewDeploymentPage: React.FC = () => {
-  const [repos, setRepos] = useState<Repository[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState<string>('');
+  const [selectedRepo, setSelectedRepo] = useState<string>(mockRepos[0].id);
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
-  const [isLoadingRepos, setIsLoadingRepos] = useState<boolean>(true);
   const [deploymentSteps, setDeploymentSteps] = useState<DeploymentStep[]>(initialSteps);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState<boolean>(true);
-  const [julesSessionUrl, setJulesSessionUrl] = useState<string | null>(null);
 
-  // Load user repositories on component mount
-  useEffect(() => {
-    const loadRepositories = async () => {
-      try {
-        setIsLoadingRepos(true);
-        const result = await fetchUserRepos({});
-        if (result.data.success) {
-          setRepos(result.data.repos);
-          if (result.data.repos.length > 0) {
-            setSelectedRepo(result.data.repos[0].id.toString());
-          }
-        }
-      } catch (error) {
-        console.error('Error loading repositories:', error);
-      } finally {
-        setIsLoadingRepos(false);
-      }
-    };
-
-    loadRepositories();
-  }, []);
-
-  const runDeployment = useCallback(async () => {
-    if (!selectedRepo) return;
-
+  const runDeployment = useCallback(() => {
     setShowInstructions(false);
     setIsDeploying(true);
     setDeployedUrl(null);
-    setJulesSessionUrl(null);
     setDeploymentSteps(initialSteps);
     setCurrentStepIndex(0);
-
-    try {
-      const selectedRepoData = repos.find(repo => repo.id.toString() === selectedRepo);
-      if (!selectedRepoData) return;
-
-      // Step 1: Detect Language & Framework
-      updateStepStatus(0, 'in-progress', 'Detecting language and framework...');
-      const languageResult = await detectRepoLanguage({ 
-        repoId: selectedRepo, 
-        owner: selectedRepoData.owner.login,
-        repo: selectedRepoData.name 
-      });
-      
-      if (languageResult.data.success) {
-        updateStepStatus(0, 'success', `Detected: ${languageResult.data.detection.primaryLanguage || 'Unknown'}`);
-      } else {
-        updateStepStatus(0, 'error', 'Failed to detect language');
-        setIsDeploying(false);
-        return;
-      }
-
-      // Step 2: Analyze Codebase (Mock AI Analysis)
-      updateStepStatus(1, 'in-progress', 'Analyzing codebase with AI...');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      setJulesSessionUrl('https://jules.ai/demo-session');
-      updateStepStatus(1, 'success', 'AI analysis completed');
-
-      // Step 3: Fix Errors & Push Changes
-      updateStepStatus(2, 'in-progress', 'Applying automated fixes...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      updateStepStatus(2, 'success', 'Automated fixes applied via PR');
-
-      // Step 4: Setup CI/CD Pipeline
-      updateStepStatus(3, 'in-progress', 'Setting up CI/CD pipeline...');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      updateStepStatus(3, 'success', 'CI/CD pipeline configured');
-
-      // Step 5: Install Dependencies
-      updateStepStatus(4, 'in-progress', 'Installing dependencies...');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      updateStepStatus(4, 'success', 'Dependencies installed');
-
-      // Step 6: Create Docker Image
-      updateStepStatus(5, 'in-progress', 'Creating Docker image...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      updateStepStatus(5, 'success', 'Docker image created');
-
-      // Step 7: Deploy to Cloud Run
-      updateStepStatus(6, 'in-progress', 'Deploying to Cloud Run...');
-      const deployResult = await deployToCloudRun({
-        repoId: selectedRepo,
-        imageUrl: `gcr.io/devyntra-500e4/${selectedRepoData.name}:latest`,
-        serviceName: selectedRepoData.name,
-        region: 'us-central1'
-      });
-
-      if (deployResult.data.success) {
-        updateStepStatus(6, 'success', 'Deployed successfully');
-        setDeployedUrl(deployResult.data.deployment.serviceUrl);
-      } else {
-        updateStepStatus(6, 'error', 'Deployment failed');
-      }
-
-      setIsDeploying(false);
-    } catch (error) {
-      console.error('Deployment error:', error);
-      updateStepStatus(currentStepIndex, 'error', 'Deployment failed');
-      setIsDeploying(false);
-    }
-  }, [selectedRepo, repos]);
-
-  const updateStepStatus = (stepIndex: number, status: DeploymentStepStatus, details: string) => {
-    setDeploymentSteps(prev => prev.map((step, index) => 
-      index === stepIndex ? { ...step, status, details } : step
-    ));
-    setCurrentStepIndex(stepIndex);
-  };
+  }, []);
 
   useEffect(() => {
     if (!isDeploying || currentStepIndex >= deploymentSteps.length) {
@@ -223,36 +122,18 @@ const NewDeploymentPage: React.FC = () => {
               <div className="animate-fade-in-up">
                 <Card className="p-6">
                   <h2 className="text-lg font-medium text-on-surface mb-4">Repository Selection</h2>
-                  {isLoadingRepos ? (
-                    <div className="text-center py-8">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                      <p className="text-on-surface-variant">Loading repositories...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <select
-                        value={selectedRepo}
-                        onChange={(e) => setSelectedRepo(e.target.value)}
-                        className="w-full p-3 bg-surface border border-outline rounded-lg focus:ring-2 focus:ring-primary focus:outline-none"
-                        disabled={repos.length === 0}
-                      >
-                        {repos.length === 0 ? (
-                          <option value="">No repositories found</option>
-                        ) : (
-                          repos.map(repo => (
-                            <option key={repo.id} value={repo.id.toString()}>{repo.owner.login}/{repo.name}</option>
-                          ))
-                        )}
-                      </select>
-                      <Button 
-                        onClick={runDeployment} 
-                        className="w-full mt-6"
-                        disabled={!selectedRepo || repos.length === 0}
-                      >
-                        Deploy Now
-                      </Button>
-                    </>
-                  )}
+                  <select
+                    value={selectedRepo}
+                    onChange={(e) => setSelectedRepo(e.target.value)}
+                    className="w-full p-3 bg-surface border border-outline rounded-lg focus:ring-2 focus:ring-primary focus:outline-none"
+                  >
+                    {mockRepos.map(repo => (
+                      <option key={repo.id} value={repo.id}>{repo.owner}/{repo.name}</option>
+                    ))}
+                  </select>
+                  <Button onClick={runDeployment} className="w-full mt-6">
+                    Deploy Now
+                  </Button>
                 </Card>
                 <div
                   className={`mt-4 text-center text-sm text-on-surface-variant transition-opacity duration-500 ${
@@ -280,16 +161,6 @@ const NewDeploymentPage: React.FC = () => {
                                   <Icons.Copy size={16} />
                               </button>
                           </div>
-                          {julesSessionUrl && (
-                            <div className="mt-4 p-4 bg-primary-container/30 rounded-lg">
-                              <h3 className="font-medium text-on-surface mb-2">AI Analysis Session</h3>
-                              <iframe 
-                                src={julesSessionUrl} 
-                                className="w-full h-96 border rounded-lg"
-                                title="Jules AI Session"
-                              />
-                            </div>
-                          )}
                       </div>
                   </Card>
                 )}
