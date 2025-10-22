@@ -4,12 +4,6 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 
-const mockRepos: Repository[] = [
-  { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
-  { id: '2', name: 'web-app-v2', owner: 'john-doe', url: '', lastUpdate: '1 day ago' },
-  { id: '3', name: 'mobile-landing', owner: 'john-doe', url: '', lastUpdate: '3 days ago' },
-];
-
 type DeploymentStepStatus = 'pending' | 'in-progress' | 'success' | 'error';
 
 interface DeploymentStep {
@@ -56,9 +50,13 @@ const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> 
   )
 }
 
+interface NewDeploymentPageProps {
+  repositories: Repository[];
+  onDeploy: (repoId: string) => void;
+}
 
-const NewDeploymentPage: React.FC = () => {
-  const [selectedRepo, setSelectedRepo] = useState<string>(mockRepos[0].id);
+const NewDeploymentPage: React.FC<NewDeploymentPageProps> = ({ repositories, onDeploy }) => {
+  const [selectedRepo, setSelectedRepo] = useState<string>(repositories[0]?.id || '');
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
   const [deploymentSteps, setDeploymentSteps] = useState<DeploymentStep[]>(initialSteps);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
@@ -127,11 +125,11 @@ const NewDeploymentPage: React.FC = () => {
                     onChange={(e) => setSelectedRepo(e.target.value)}
                     className="w-full p-3 bg-surface border border-outline rounded-lg focus:ring-2 focus:ring-primary focus:outline-none"
                   >
-                    {mockRepos.map(repo => (
+                    {repositories.map(repo => (
                       <option key={repo.id} value={repo.id}>{repo.owner}/{repo.name}</option>
                     ))}
                   </select>
-                  <Button onClick={runDeployment} className="w-full mt-6">
+                  <Button onClick={() => onDeploy(selectedRepo)} className="w-full mt-6">
                     Deploy Now
                   </Button>
                 </Card>

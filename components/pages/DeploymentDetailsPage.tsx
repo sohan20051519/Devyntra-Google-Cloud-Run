@@ -1,17 +1,9 @@
 import React from 'react';
-import { Deployment } from '../../types';
+import { Deployment, DeploymentLog } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
 import { Globe, GitCommit, GitBranch } from 'lucide-react';
-
-const mockDeploymentLogs = [
-    { id: '1', time: '2 minutes ago', message: 'Deployment successful. Service is live.' },
-    { id: '2', time: '3 minutes ago', message: 'Finalizing deployment and running health checks.' },
-    { id: '3', time: '4 minutes ago', message: 'Pushing image to Google Cloud Registry.' },
-    { id: '4', time: '5 minutes ago', message: 'Successfully built docker image.' },
-    { id: '5', time: '6 minutes ago', message: 'Build process started.' },
-];
 
 const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => {
   const baseClasses = 'px-3 py-1 text-xs font-medium rounded-full inline-flex items-center gap-1.5';
@@ -37,7 +29,15 @@ const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string |
     </div>
 )
 
-const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onBack, onViewLogs }) => {
+const DeploymentDetailsPage: React.FC<{
+    deployment: Deployment;
+    logs: DeploymentLog[];
+    onBack: () => void;
+    onViewLogs: (deployment: Deployment) => void;
+    onRollback: (deploymentId: string) => void;
+    onDelete: (deploymentId: string) => void;
+    onRedeploy: (deploymentId: string) => void;
+}> = ({ deployment, logs, onBack, onViewLogs, onRollback, onDelete, onRedeploy }) => {
     return (
         <div className="flex flex-col h-full animate-fade-in-up">
             {/* Header */}
@@ -58,7 +58,7 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                                 <Button variant="outlined">Visit Site</Button>
                             </a>
                         )}
-                        <Button variant="filled">Redeploy</Button>
+                        <Button variant="filled" onClick={() => onRedeploy(deployment.id)}>Redeploy</Button>
                     </div>
                 </div>
             </div>
@@ -83,7 +83,7 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                             <Button variant="text" onClick={() => onViewLogs(deployment)}>View all logs <Icons.ArrowRight size={14} className="ml-1"/></Button>
                           </div>
                           <div className="font-mono text-sm bg-inverse-surface text-inverse-on-surface rounded-lg p-4 overflow-x-auto">
-                              {mockDeploymentLogs.map(log => (
+                              {logs.map(log => (
                                   <div key={log.id} className="flex">
                                       <span className="text-inverse-on-surface/50 mr-4 whitespace-nowrap">{log.time}</span>
                                       <p className="break-words text-inverse-on-surface">{log.message}</p>
@@ -98,9 +98,9 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                       <Card>
                           <h2 className="text-xl font-medium text-on-surface mb-4">Manage</h2>
                           <div className="space-y-2">
-                              <Button variant="outlined" className="w-full">Rollback to Previous Version</Button>
+                              <Button variant="outlined" className="w-full" onClick={() => onRollback(deployment.id)}>Rollback to Previous Version</Button>
                               <Button variant="outlined" className="w-full">View GitHub Actions</Button>
-                              <Button variant="outlined" className="border-error text-error hover:bg-error-container w-full mt-4">Delete Deployment</Button>
+                              <Button variant="outlined" className="border-error text-error hover:bg-error-container w-full mt-4" onClick={() => onDelete(deployment.id)}>Delete Deployment</Button>
                           </div>
                       </Card>
 

@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../../types';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-import { getDevAIChatResponse } from '../../services/gemini';
+import { functions } from '../../services/firebase';
+import { httpsCallable } from 'firebase/functions';
 import Card from '../ui/Card';
 
 const DevAIPage: React.FC = () => {
@@ -28,8 +29,9 @@ const DevAIPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-        const aiResponseText = await getDevAIChatResponse(messages, input);
-        const aiMessage: ChatMessage = { id: (Date.now() + 1).toString(), text: aiResponseText, sender: 'ai' };
+        const getChatbotResponse = httpsCallable(functions, 'getChatbotResponse');
+        const result = await getChatbotResponse({ message: input });
+        const aiMessage: ChatMessage = { id: (Date.now() + 1).toString(), text: (result.data as any).response, sender: 'ai' };
         setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
         const errorMessage: ChatMessage = { id: (Date.now() + 1).toString(), text: 'Sorry, something went wrong.', sender: 'ai' };
