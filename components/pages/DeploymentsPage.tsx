@@ -4,8 +4,14 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
 
+const mockDeployments: Deployment[] = [
+  { id: '1', repoName: 'project-phoenix', status: 'Deployed', url: 'https://project-phoenix-xyz123.run.app', deployedAt: '2 minutes ago', branch: 'main', commitHash: 'a1b2c3d' },
+  { id: '2', repoName: 'web-app-v2', status: 'Deployed', url: 'https://web-app-v2-abc456.run.app', deployedAt: '1 day ago', branch: 'main', commitHash: 'e4f5g6h' },
+  { id: '3', repoName: 'mobile-landing', status: 'Failed', url: '-', deployedAt: '3 days ago', branch: 'feature/new-design', commitHash: 'i7j8k9l' },
+  { id: '4', repoName: 'api-gateway', status: 'Building', url: '-', deployedAt: '5 minutes ago', branch: 'develop', commitHash: 'm0n1o2p' },
+];
+
 interface DeploymentsPageProps {
-  deployments: Deployment[];
   onViewDetails: (deployment: Deployment) => void;
   onNewDeployment: () => void;
   onViewLogs: (deployment: Deployment) => void;
@@ -52,7 +58,7 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
   </Card>
 );
 
-const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ deployments, onViewDetails, onNewDeployment, onViewLogs }) => {
+const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs }) => {
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -68,7 +74,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ deployments, onViewDe
       <div className="flex-1 overflow-y-auto">
         {/* Mobile View: List of Cards */}
         <div className="md:hidden">
-          {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
+          {mockDeployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
         </div>
 
         {/* Desktop View: Table */}
@@ -84,7 +90,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ deployments, onViewDe
               </tr>
             </thead>
             <tbody>
-              {deployments.map((dep) => (
+              {mockDeployments.map((dep) => (
                 <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
                   <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
                   <td className="p-4"><StatusBadge status={dep.status} /></td>

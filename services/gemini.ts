@@ -4,9 +4,9 @@ import { ChatMessage } from "../types";
 
 // IMPORTANT: Do not expose this key publicly. In a real app, this should be on a server.
 // For this project, it's assumed to be in the environment variables.
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const apiKey = process.env.API_KEY;
 if (!apiKey) {
-    console.warn("VITE_GEMINI_API_KEY environment variable not set. Using mock responses.");
+    console.warn("API_KEY environment variable not set. Using mock responses.");
 }
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
