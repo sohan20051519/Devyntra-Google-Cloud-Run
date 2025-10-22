@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import OverviewPage from './pages/OverviewPage';
 import NewDeploymentPage from './pages/NewDeploymentPage';
@@ -7,8 +7,12 @@ import DevAIPage from './pages/DevAIPage';
 import LogsPage from './pages/LogsPage';
 import SettingsPage from './pages/SettingsPage';
 import DeploymentDetailsPage from './pages/DeploymentDetailsPage';
-import { Page, Deployment } from '../types';
+import { Page, Deployment, Repository, DeploymentLog } from '../types';
 import { Icons } from './icons/Icons';
+import { db, functions } from '../services/firebase';
+import { collection, onSnapshot } from "firebase/firestore";
+import { httpsCallable } from 'firebase/functions';
+import { auth } from '../services/firebase';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -19,6 +23,71 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [logFilter, setLogFilter] = useState<string | null>(null);
+
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLog[]>([]);
+  const [dashboardData, setDashboardData] = useState<any>({});
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const deploymentsUnsubscribe = onSnapshot(collection(db, "users", auth.currentUser.uid, "deployments"), (snapshot) => {
+      const deployments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Deployment[];
+      setDeployments(deployments);
+    });
+
+    const reposUnsubscribe = onSnapshot(collection(db, "users", auth.currentUser.uid, "repositories"), (snapshot) => {
+      const repositories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Repository[];
+      setRepositories(repositories);
+    });
+
+    const getDashboardData = httpsCallable(functions, 'getDashboardData');
+    getDashboardData().then((result) => {
+      setDashboardData(result.data);
+    });
+
+    return () => {
+      deploymentsUnsubscribe();
+      reposUnsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDeployment || !auth.currentUser) return;
+
+    const logsUnsubscribe = onSnapshot(collection(db, "users", auth.currentUser.uid, "deployments", selectedDeployment.id, "logs"), (snapshot) => {
+      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as DeploymentLog[];
+      setDeploymentLogs(logs);
+    });
+
+    return () => {
+      logsUnsubscribe();
+    };
+  }, [selectedDeployment]);
+
+  const handleDeploy = (repoId: string) => {
+    const selectedRepo = repositories.find(repo => repo.id === repoId);
+    if (selectedRepo) {
+      const startDeployment = httpsCallable(functions, 'startDeployment');
+      startDeployment({ repoName: selectedRepo.name });
+    }
+  };
+
+  const handleRollback = (deploymentId: string) => {
+    const rollbackDeployment = httpsCallable(functions, 'rollbackDeployment');
+    rollbackDeployment({ deploymentId });
+  };
+
+  const handleDelete = (deploymentId: string) => {
+    const deleteDeployment = httpsCallable(functions, 'deleteDeployment');
+    deleteDeployment({ deploymentId });
+  };
+
+  const handleRedeploy = (deploymentId: string) => {
+    const redeploy = httpsCallable(functions, 'redeploy');
+    redeploy({ deploymentId });
+  };
 
   const handleViewDeploymentDetails = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
@@ -47,11 +116,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const renderContent = () => {
     switch (activePage) {
       case Page.Overview:
-        return <OverviewPage />;
+        return <OverviewPage
+          totalDeployments={dashboardData.totalDeployments}
+          successfulBuilds={dashboardData.successfulBuilds}
+          failedBuilds={dashboardData.failedBuilds}
+          connectedRepos={dashboardData.connectedRepos}
+          weeklyActivity={dashboardData.weeklyActivity}
+          recentActivity={dashboardData.recentActivity}
+        />;
       case Page.NewDeployment:
-        return <NewDeploymentPage />;
+        return <NewDeploymentPage repositories={repositories} onDeploy={handleDeploy} />;
       case Page.Deployments:
         return <DeploymentsPage 
+          deployments={deployments}
           onViewDetails={handleViewDeploymentDetails} 
           onNewDeployment={() => handleGoToPage(Page.NewDeployment)}
           onViewLogs={handleViewLogs} 
@@ -60,10 +137,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         return selectedDeployment 
           ? <DeploymentDetailsPage 
               deployment={selectedDeployment} 
+              logs={deploymentLogs}
               onBack={handleBackToDeployments}
               onViewLogs={handleViewLogs}
+              onRollback={handleRollback}
+              onDelete={handleDelete}
+              onRedeploy={handleRedeploy}
             /> 
           : <DeploymentsPage 
+              deployments={deployments}
               onViewDetails={handleViewDeploymentDetails} 
               onNewDeployment={() => handleGoToPage(Page.NewDeployment)}
               onViewLogs={handleViewLogs}

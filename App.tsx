@@ -1,22 +1,32 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth } from './services/firebase';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [user, setUser] = useState<User | null>(null);
 
-  const handleLogin = useCallback(() => {
-    setIsAuthenticated(true);
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+    });
+
+    return () => unsubscribe();
   }, []);
-  
-  const handleLogout = useCallback(() => {
-    setIsAuthenticated(false);
-  }, []);
+
+  const handleLogin = () => {
+    // This will be handled by the Firebase Auth UI
+  };
+
+  const handleLogout = () => {
+    auth.signOut();
+  };
 
   return (
     <div className="min-h-screen bg-background text-on-background font-sans">
-      {isAuthenticated ? (
+      {user ? (
         <Dashboard onLogout={handleLogout} />
       ) : (
         <LandingPage onLogin={handleLogin} />
