@@ -38,7 +38,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
         localStorage.setItem('github_email', userProp.email);
       }
     }
-  }, [userProp, user]);
+  }, [userProp]);
 
   const handleViewDeploymentDetails = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
