@@ -12,9 +12,10 @@ import { Icons } from './icons/Icons';
 
 interface DashboardProps {
   onLogout: () => void;
+  userProp: any | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
   const [activePage, setActivePage] = useState<Page>(Page.Overview);
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
@@ -90,6 +91,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         onLogout={onLogout}
         isOpen={isSidebarOpen}
         setIsOpen={setSidebarOpen}
+        userProp={userProp}
       />
       <main className="flex-1 flex flex-col p-4 md:p-8 bg-background overflow-y-hidden">
         <header className="md:hidden flex-shrink-0 flex justify-between items-center mb-4 pb-4 border-b border-outline/20">
@@ -99,10 +101,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             </div>
             <h1 className="text-lg font-bold text-primary">Devyntra</h1>
           </div>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-on-background">
+          <div className="flex items-center gap-3">
+            <div className="text-right mr-2">
+              <div className="text-sm font-medium">{userProp?.displayName ?? userProp?.email?.split('@')[0] ?? 'Guest'}</div>
+              <div className="text-xs text-on-surface-variant">{userProp?.email ?? 'Not connected'}</div>
+            </div>
+            <button onClick={() => setSidebarOpen(true)} className="p-2 text-on-background">
               <Icons.Menu size={24} />
-          </button>
+            </button>
+          </div>
         </header>
+        {/* Desktop header showing user info */}
+        <div className="hidden md:flex items-center justify-end mb-4">
+          <div className="text-right mr-4">
+            <div className="text-sm font-medium">{userProp?.displayName ?? userProp?.email?.split('@')[0] ?? 'Guest'}</div>
+            <div className="text-xs text-on-surface-variant">{userProp?.email ?? 'Not connected'}</div>
+          </div>
+        </div>
         <div className="max-w-7xl mx-auto w-full flex-1 min-h-0">
           {renderContent()}
         </div>

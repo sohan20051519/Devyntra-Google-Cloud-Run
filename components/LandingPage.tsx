@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import { Icons } from './icons/Icons';
+import { signInWithGitHub } from '../services/firebase';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -79,7 +80,25 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
           </div>
           <Button 
             variant="outlined" 
-            onClick={onLogin} 
+            onClick={async () => {
+              try {
+                // If token already exists, just call onLogin
+                const existing = localStorage.getItem('github_access_token');
+                if (existing) {
+                  onLogin();
+                  return;
+                }
+                const res = await signInWithGitHub();
+                if (res?.accessToken) {
+                  localStorage.setItem('github_access_token', res.accessToken);
+                  if (res.email) localStorage.setItem('github_email', res.email);
+                  onLogin();
+                }
+              } catch (e) {
+                console.error('GitHub auth failed', e);
+                alert('GitHub authentication failed. Check console for details.');
+              }
+            }} 
             icon={<Icons.GitHub size={16} />}
             className={`transition-all duration-300 ${isScrolled ? '!py-1.5 !px-4 !text-xs' : ''}`}
           >

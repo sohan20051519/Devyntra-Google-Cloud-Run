@@ -2,6 +2,7 @@
 import React from 'react';
 import { Icons } from './icons/Icons';
 import { Page } from '../types';
+import { signOutUser, signInWithGitHub } from '../services/firebase';
 
 interface SidebarProps {
   activePage: Page;
@@ -9,6 +10,7 @@ interface SidebarProps {
   onLogout: () => void;
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
+  userProp?: any | null;
 }
 
 const NavItem: React.FC<{
@@ -36,7 +38,7 @@ const NavItem: React.FC<{
   </li>
 );
 
-const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, isOpen, setIsOpen }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, isOpen, setIsOpen, userProp }) => {
   const navItems = [
     { id: Page.Overview, label: 'Overview', icon: <Icons.Dashboard size={20} /> },
     { id: Page.NewDeployment, label: 'New Deployment', icon: <Icons.NewDeployment size={20} /> },
@@ -52,9 +54,27 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
   };
 
   const handleLogout = () => {
-    onLogout();
-    setIsOpen(false);
+    // Sign out from Firebase and invoke parent logout
+    signOutUser().catch(e => console.error('Sign out error', e)).finally(() => {
+      onLogout();
+      setIsOpen(false);
+    });
   }
+
+  const handleConnect = async () => {
+    try {
+      const res = await signInWithGitHub();
+      if (res?.accessToken) {
+        localStorage.setItem('github_access_token', res.accessToken);
+      }
+    } catch (e) {
+      console.error('Connect failed', e);
+      alert('GitHub connect failed. Check console for details.');
+    }
+  };
+
+  // use user from parent when available
+  const user = userProp ?? null;
 
   return (
     <>
@@ -89,20 +109,29 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
         <div>
           <div className="p-3 mb-2">
             <div className="flex items-center">
-              <img src="https://picsum.photos/40/40" alt="User Avatar" className="w-10 h-10 rounded-full mr-3" />
+              <img src={user?.photoURL || 'https://picsum.photos/40/40'} alt="User Avatar" className="w-10 h-10 rounded-full mr-3" />
               <div>
-                <p className="font-medium text-on-surface">John Doe</p>
-                <p className="text-sm text-on-surface-variant">john.doe@example.com</p>
+                <p className="font-medium text-on-surface">{user?.displayName ?? (localStorage.getItem('github_email')?.split('@')[0]) ?? 'Unnamed'}</p>
+                <p className="text-sm text-on-surface-variant">{user?.email ?? localStorage.getItem('github_email') ?? 'Not connected'}</p>
               </div>
             </div>
           </div>
           <ul>
-            <NavItem
-              icon={<Icons.Logout size={20} />}
-              label="Logout"
-              isActive={false}
-              onClick={handleLogout}
-            />
+            {user ? (
+              <NavItem
+                icon={<Icons.Logout size={20} />}
+                label="Logout"
+                isActive={false}
+                onClick={handleLogout}
+              />
+            ) : (
+              <NavItem
+                icon={<Icons.GitHub size={20} />}
+                label="Connect GitHub"
+                isActive={false}
+                onClick={async () => { await handleConnect(); setIsOpen(false); }}
+              />
+            )}
           </ul>
         </div>
       </aside>

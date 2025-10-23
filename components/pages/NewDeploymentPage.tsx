@@ -3,6 +3,7 @@ import { Repository } from '../../types';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
+import { fetchUserRepos } from '../../services/github';
 
 const mockRepos: Repository[] = [
   { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
@@ -58,7 +59,10 @@ const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> 
 
 
 const NewDeploymentPage: React.FC = () => {
-  const [selectedRepo, setSelectedRepo] = useState<string>(mockRepos[0].id);
+  const [repos, setRepos] = useState<Repository[] | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [isLoadingRepos, setIsLoadingRepos] = useState<boolean>(false);
+  const [reposError, setReposError] = useState<string | null>(null);
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
   const [deploymentSteps, setDeploymentSteps] = useState<DeploymentStep[]>(initialSteps);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
@@ -100,6 +104,27 @@ const NewDeploymentPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [isDeploying, currentStepIndex, deploymentSteps.length]);
 
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setIsLoadingRepos(true);
+      setReposError(null);
+      try {
+        const fetched = await fetchUserRepos();
+        if (!mounted) return;
+        setRepos(fetched);
+        setSelectedRepo(fetched[0]?.id ?? null);
+      } catch (err: any) {
+        console.error('Failed to fetch repos', err);
+        setReposError(err?.message ?? String(err));
+      } finally {
+        setIsLoadingRepos(false);
+      }
+    };
+    load();
+    return () => { mounted = false };
+  }, []);
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -122,15 +147,23 @@ const NewDeploymentPage: React.FC = () => {
               <div className="animate-fade-in-up">
                 <Card className="p-6">
                   <h2 className="text-lg font-medium text-on-surface mb-4">Repository Selection</h2>
-                  <select
-                    value={selectedRepo}
-                    onChange={(e) => setSelectedRepo(e.target.value)}
-                    className="w-full p-3 bg-surface border border-outline rounded-lg focus:ring-2 focus:ring-primary focus:outline-none"
-                  >
-                    {mockRepos.map(repo => (
-                      <option key={repo.id} value={repo.id}>{repo.owner}/{repo.name}</option>
-                    ))}
-                  </select>
+                  {isLoadingRepos ? (
+                    <div className="p-4 text-center">Loading repositories...</div>
+                  ) : reposError ? (
+                    <div className="p-4 text-center text-error">Error: {reposError}</div>
+                  ) : repos && repos.length > 0 ? (
+                    <select
+                      value={selectedRepo ?? ''}
+                      onChange={(e) => setSelectedRepo(e.target.value)}
+                      className="w-full p-3 bg-surface border border-outline rounded-lg focus:ring-2 focus:ring-primary focus:outline-none"
+                    >
+                      {repos.map(repo => (
+                        <option key={repo.id} value={repo.id}>{repo.owner}/{repo.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="p-4 text-center">No repositories found. Connect a GitHub account or check permissions.</div>
+                  )}
                   <Button onClick={runDeployment} className="w-full mt-6">
                     Deploy Now
                   </Button>
