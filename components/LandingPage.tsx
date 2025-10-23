@@ -46,17 +46,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
 
   const handleLogin = async () => {
     try {
-      // If token already exists, just call onLogin
-      const existing = localStorage.getItem('github_access_token');
-      if (existing) {
-        onLogin();
-        return;
-      }
       const res = await signInWithGitHub();
       if (res?.accessToken) {
         localStorage.setItem('github_access_token', res.accessToken);
         if (res.email) localStorage.setItem('github_email', res.email);
-        onLogin();
       }
     } catch (e) {
       console.error('GitHub auth failed', e);
