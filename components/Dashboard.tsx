@@ -112,32 +112,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
         setIsOpen={setSidebarOpen}
          userProp={user}
       />
-      <main className="flex-1 flex flex-col p-4 md:p-8 bg-background overflow-y-hidden">
-        <header className="md:hidden flex-shrink-0 flex justify-between items-center mb-4 pb-4 border-b border-outline/20">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-primary rounded-md">
-              <Icons.Code size={20} className="text-on-primary" />
-            </div>
-            <h1 className="text-lg font-bold text-primary">Devyntra</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right mr-2">
-              <div className="text-sm font-medium">{user?.displayName ?? user?.email?.split('@')[0] ?? 'Guest'}</div>
-              <div className="text-xs text-on-surface-variant">{user?.email ?? 'Not connected'}</div>
-            </div>
-            <button onClick={() => setSidebarOpen(true)} className="p-2 text-on-background">
-              <Icons.Menu size={24} />
-            </button>
-          </div>
+      <main className="flex-1 flex flex-col bg-background overflow-y-hidden">
+        {/* Mobile Header */}
+        <header className="md:hidden flex-shrink-0 flex justify-between items-center p-4">
+          <div />
+          <button onClick={() => setSidebarOpen(true)} className="p-2 text-on-background">
+            <Icons.Menu size={24} />
+          </button>
         </header>
-        {/* Desktop header showing user info */}
-        <div className="hidden md:flex items-center justify-end mb-4">
-          <div className="text-right mr-4">
-            <div className="text-sm font-medium">{user?.displayName ?? user?.email?.split('@')[0] ?? 'Guest'}</div>
-            <div className="text-xs text-on-surface-variant">{user?.email ?? 'Not connected'}</div>
-          </div>
-        </div>
-        <div className="max-w-7xl mx-auto w-full flex-1 min-h-0">
+
+        <div className="w-full flex-1 min-h-0 p-4 md:p-8">
           {renderContent()}
         </div>
       </main>

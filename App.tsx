@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const handleLogout = useCallback(async () => {
     try {
       await signOutUser();
+      setUser(null); // Explicitly clear user state
     } catch (e) {
       console.error('Sign out failed', e);
     }
