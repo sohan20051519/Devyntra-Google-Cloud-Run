@@ -111,8 +111,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
             <div className="flex items-center">
               <img src={user?.photoURL || 'https://picsum.photos/40/40'} alt="User Avatar" className="w-10 h-10 rounded-full mr-3 flex-shrink-0" />
               <div className="min-w-0">
-                <p className="font-medium text-on-surface break-words">{user?.displayName ?? (localStorage.getItem('github_email')?.split('@')[0]) ?? 'Unnamed'}</p>
-                <p className="text-sm text-on-surface-variant break-words">{user?.email ?? localStorage.getItem('github_email') ?? 'Not connected'}</p>
+                <p className="font-medium text-on-surface truncate">{user?.displayName ?? (localStorage.getItem('github_email')?.split('@')[0]) ?? 'Unnamed'}</p>
+                <p className="text-sm text-on-surface-variant truncate">{user?.email ?? localStorage.getItem('github_email') ?? 'Not connected'}</p>
               </div>
             </div>
           </div>
