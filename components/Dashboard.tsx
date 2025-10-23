@@ -67,7 +67,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
   const renderContent = () => {
     switch (activePage) {
       case Page.Overview:
-        return <OverviewPage user={user} />;
+        return <OverviewPage />;
       case Page.NewDeployment:
         return <NewDeploymentPage />;
       case Page.Deployments:
@@ -98,7 +98,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
       case Page.Settings:
         return <SettingsPage />;
       default:
-        return <OverviewPage user={user} />;
+        return <OverviewPage />;
     }
   };
 

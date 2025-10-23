@@ -25,6 +25,8 @@ const App: React.FC = () => {
   const handleLogout = useCallback(async () => {
     try {
       await signOutUser();
+      localStorage.removeItem('github_access_token');
+      localStorage.removeItem('github_email');
       setUser(null); // Explicitly clear user state
     } catch (e) {
       console.error('Sign out failed', e);

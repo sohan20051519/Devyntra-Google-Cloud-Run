@@ -25,11 +25,7 @@ const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode; 
     </Card>
 )
 
-interface OverviewPageProps {
-  user: any | null;
-}
-
-const OverviewPage: React.FC<OverviewPageProps> = ({ user }) => {
+const OverviewPage: React.FC = () => {
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -41,12 +37,7 @@ const OverviewPage: React.FC<OverviewPageProps> = ({ user }) => {
           <StatCard title="Total Deployments" value="128" icon={<Icons.Deployments size={24} className="text-on-primary-container"/>} color="bg-primary-container" />
           <StatCard title="Successful Builds" value="1,204" icon={<Icons.CheckCircle size={24} className="text-green-800"/>} color="bg-green-100" />
           <StatCard title="Failed Builds" value="12" icon={<Icons.XCircle size={24} className="text-on-error-container"/>} color="bg-error-container" />
-          <StatCard
-            title="GitHub"
-            value={user ? "Connected" : "Not connected"}
-            icon={<Icons.GitHub size={24} className="text-on-secondary-container"/>}
-            color="bg-secondary-container"
-          />
+          <StatCard title="Connected Repos" value="8" icon={<Icons.GitHub size={24} className="text-on-secondary-container"/>} color="bg-secondary-container" />
         </div>
 
         <Card className="mb-8">

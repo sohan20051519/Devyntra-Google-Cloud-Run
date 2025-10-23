@@ -1,5 +1,6 @@
 
-import React from 'react';
+import React, { useState } from 'react';
+import ConfirmationModal from './ui/ConfirmationModal';
 import { Icons } from './icons/Icons';
 import { Page } from '../types';
 import { signOutUser, signInWithGitHub } from '../services/firebase';
@@ -39,6 +40,7 @@ const NavItem: React.FC<{
 );
 
 const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, isOpen, setIsOpen, userProp }) => {
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const navItems = [
     { id: Page.Overview, label: 'Overview', icon: <Icons.Dashboard size={20} /> },
     { id: Page.NewDeployment, label: 'New Deployment', icon: <Icons.NewDeployment size={20} /> },
@@ -54,12 +56,14 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
   };
 
   const handleLogout = () => {
-    // Sign out from Firebase and invoke parent logout
-    signOutUser().catch(e => console.error('Sign out error', e)).finally(() => {
-      onLogout();
-      setIsOpen(false);
-    });
-  }
+    setIsLogoutModalOpen(true);
+  };
+
+  const confirmLogout = () => {
+    onLogout();
+    setIsLogoutModalOpen(false);
+    setIsOpen(false);
+  };
 
   const handleConnect = async () => {
     try {
@@ -78,6 +82,13 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
 
   return (
     <>
+      <ConfirmationModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={confirmLogout}
+        title="Confirm Logout"
+        message="Are you sure you want to sign out?"
+      />
       {/* Overlay */}
       <div
         className={`fixed inset-0 bg-black/40 z-30 transition-opacity md:hidden ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
