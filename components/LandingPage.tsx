@@ -44,6 +44,26 @@ const AnimatedText: React.FC<{ text: string; delay?: number; className?: string 
 const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
+  const handleLogin = async () => {
+    try {
+      // If token already exists, just call onLogin
+      const existing = localStorage.getItem('github_access_token');
+      if (existing) {
+        onLogin();
+        return;
+      }
+      const res = await signInWithGitHub();
+      if (res?.accessToken) {
+        localStorage.setItem('github_access_token', res.accessToken);
+        if (res.email) localStorage.setItem('github_email', res.email);
+        onLogin();
+      }
+    } catch (e) {
+      console.error('GitHub auth failed', e);
+      alert('GitHub authentication failed. Check console for details.');
+    }
+  };
+
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 50);
@@ -80,25 +100,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
           </div>
           <Button 
             variant="outlined" 
-            onClick={async () => {
-              try {
-                // If token already exists, just call onLogin
-                const existing = localStorage.getItem('github_access_token');
-                if (existing) {
-                  onLogin();
-                  return;
-                }
-                const res = await signInWithGitHub();
-                if (res?.accessToken) {
-                  localStorage.setItem('github_access_token', res.accessToken);
-                  if (res.email) localStorage.setItem('github_email', res.email);
-                  onLogin();
-                }
-              } catch (e) {
-                console.error('GitHub auth failed', e);
-                alert('GitHub authentication failed. Check console for details.');
-              }
-            }} 
+            onClick={handleLogin}
             icon={<Icons.GitHub size={16} />}
             className={`transition-all duration-300 ${isScrolled ? '!py-1.5 !px-4 !text-xs' : ''}`}
           >
@@ -126,7 +128,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 Devyntra is the AI co-pilot for modern CI/CD. Connect your GitHub and watch as we analyze, containerize, and deploy your applications with zero configuration.
               </p>
               <div className="animate-fade-in-up flex justify-center lg:justify-start" style={{ animationDelay: '800ms' }}>
-                 <Button onClick={onLogin} icon={<Icons.GitHub size={20}/>} className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright">
+                  <Button onClick={handleLogin} icon={<Icons.GitHub size={20}/>} className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright">
                     Deploy Your First App
                  </Button>
               </div>
@@ -403,7 +405,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   Stop wrestling with configurations and start building what matters. Connect your repository and deploy your first application in minutes.
               </p>
               <div className="flex justify-center">
-                  <Button onClick={onLogin} icon={<Icons.GitHub size={20}/>} className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright">
+                   <Button onClick={handleLogin} icon={<Icons.GitHub size={20}/>} className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright">
                       Connect GitHub & Deploy for Free
                   </Button>
               </div>
