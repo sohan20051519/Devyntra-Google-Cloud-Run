@@ -151,4 +151,35 @@ export async function updateDisplayName(name: string) {
   return updateProfile(auth.currentUser, { displayName: name });
 }
 
+// Debug function to check GitHub token status
+export async function checkGitHubTokenStatus() {
+  const user = auth.currentUser;
+  if (!user) {
+    console.log('No user logged in');
+    return { hasUser: false, hasToken: false };
+  }
+
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const { db } = await import('./firestore');
+    
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.data();
+    
+    const hasToken = !!userData?.githubToken;
+    console.log('GitHub token status:', {
+      hasUser: true,
+      hasToken,
+      tokenLength: userData?.githubToken?.length || 0,
+      userExists: userDoc.exists(),
+      userData: userData ? Object.keys(userData) : null
+    });
+    
+    return { hasUser: true, hasToken, userData };
+  } catch (error) {
+    console.error('Error checking GitHub token status:', error);
+    return { hasUser: true, hasToken: false, error: error.message };
+  }
+}
+
 export { auth };

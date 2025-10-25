@@ -5,6 +5,7 @@ import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 import { fetchUserRepos } from '../../services/github';
 import { startDeployment, watchDeployment } from '../../services/firestore';
+import { checkGitHubTokenStatus, signInWithGitHub } from '../../services/firebase';
 
 const mockRepos: Repository[] = [
   { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
@@ -70,6 +71,7 @@ const NewDeploymentPage: React.FC = () => {
   const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState<boolean>(true);
   const [deploymentId, setDeploymentId] = useState<string | null>(null);
+  const [githubTokenStatus, setGithubTokenStatus] = useState<{ hasUser: boolean; hasToken: boolean } | null>(null);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -95,6 +97,29 @@ const NewDeploymentPage: React.FC = () => {
       alert(`Deployment failed: ${error.message}`);
     }
   }, [selectedRepo, repos]);
+
+  // Check GitHub token status
+  const checkTokenStatus = useCallback(async () => {
+    try {
+      const status = await checkGitHubTokenStatus();
+      setGithubTokenStatus(status);
+      console.log('GitHub token status:', status);
+    } catch (error) {
+      console.error('Error checking GitHub token status:', error);
+    }
+  }, []);
+
+  // Re-authenticate with GitHub
+  const reAuthenticateGitHub = useCallback(async () => {
+    try {
+      await signInWithGitHub();
+      await checkTokenStatus();
+      alert('GitHub authentication successful! You can now deploy.');
+    } catch (error) {
+      console.error('GitHub re-authentication failed:', error);
+      alert('GitHub authentication failed. Please try again.');
+    }
+  }, [checkTokenStatus]);
 
   // Watch deployment progress in real-time
   useEffect(() => {
@@ -176,6 +201,11 @@ const NewDeploymentPage: React.FC = () => {
     return () => { mounted = false };
   }, []);
 
+  // Check GitHub token status on mount
+  useEffect(() => {
+    checkTokenStatus();
+  }, [checkTokenStatus]);
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -188,6 +218,37 @@ const NewDeploymentPage: React.FC = () => {
                   : 'Select a repository to begin the automated deployment process.'
           }
         </p>
+        
+        {/* GitHub Authentication Status */}
+        {githubTokenStatus && (
+          <Card className="mb-6">
+            <div className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Icons.GitHub size={24} className="text-on-surface" />
+                  <div>
+                    <h3 className="text-lg font-medium text-on-surface">GitHub Authentication</h3>
+                    <p className="text-sm text-on-surface-variant">
+                      {githubTokenStatus.hasToken 
+                        ? '✅ Connected - Ready to deploy' 
+                        : '❌ Not connected - Please authenticate to deploy'
+                      }
+                    </p>
+                  </div>
+                </div>
+                {!githubTokenStatus.hasToken && (
+                  <Button 
+                    onClick={reAuthenticateGitHub}
+                    variant="primary"
+                    size="sm"
+                  >
+                    Connect GitHub
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
       
       <div className="flex-1 overflow-y-auto">
