@@ -1,15 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-
-const mockDeployments: Deployment[] = [
-  { id: '1', repoName: 'project-phoenix', status: 'Deployed', url: 'https://project-phoenix-xyz123.run.app', deployedAt: '2 minutes ago', branch: 'main', commitHash: 'a1b2c3d' },
-  { id: '2', repoName: 'web-app-v2', status: 'Deployed', url: 'https://web-app-v2-abc456.run.app', deployedAt: '1 day ago', branch: 'main', commitHash: 'e4f5g6h' },
-  { id: '3', repoName: 'mobile-landing', status: 'Failed', url: '-', deployedAt: '3 days ago', branch: 'feature/new-design', commitHash: 'i7j8k9l' },
-  { id: '4', repoName: 'api-gateway', status: 'Building', url: '-', deployedAt: '5 minutes ago', branch: 'develop', commitHash: 'm0n1o2p' },
-];
+import { getDeployments } from '../../services/firestore';
+import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
+import { auth } from '../../services/firebase';
 
 interface DeploymentsPageProps {
   onViewDetails: (deployment: Deployment) => void;
@@ -20,14 +16,17 @@ interface DeploymentsPageProps {
 const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => {
   const baseClasses = 'px-3 py-1 text-xs font-medium rounded-full inline-flex items-center gap-1.5';
   switch (status) {
-    case 'Deployed':
+    case 'deployed':
       return <span className={`${baseClasses} bg-green-100 text-green-800`}><Icons.CheckCircle size={12} />Deployed</span>;
-    case 'Building':
-      return <span className={`${baseClasses} bg-blue-100 text-blue-800`}><Icons.Spinner size={12} className="animate-spin" />Building</span>;
-    case 'Failed':
-      return <span className={`${baseClasses} bg-error-container text-on-error-container`}><Icons.XCircle size={12} />Failed</span>;
+    case 'deploying':
+    case 'analyzing':
+    case 'fixing':
+    case 'detecting_language':
+      return <span className={`${baseClasses} bg-blue-100 text-blue-800`}><Icons.Spinner size={12} className="animate-spin" />{formatDeploymentStatus(status)}</span>;
+    case 'failed':
+      return <span className={`${baseClasses} bg-red-100 text-red-800`}><Icons.XCircle size={12} />Failed</span>;
     default:
-      return <span className={`${baseClasses} bg-gray-100 text-gray-800`}>{status}</span>;
+      return <span className={`${baseClasses} bg-gray-100 text-gray-800`}>{formatDeploymentStatus(status)}</span>;
   }
 };
 
@@ -39,17 +38,27 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
     </div>
     <div className="mt-4 space-y-2 text-sm">
       <div className="flex justify-between">
+        <span className="text-on-surface-variant">Language:</span>
+        <span className="text-on-surface-variant">{deployment.language || 'Unknown'}/{deployment.framework || 'Unknown'}</span>
+      </div>
+      <div className="flex justify-between">
         <span className="text-on-surface-variant">URL:</span>
-        {deployment.url !== '-' ? (
-          <a href={deployment.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{deployment.url}</a>
+        {deployment.deploymentUrl ? (
+          <a href={deployment.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{deployment.deploymentUrl}</a>
         ) : (
           <span className="text-on-surface-variant">-</span>
         )}
       </div>
       <div className="flex justify-between">
-        <span className="text-on-surface-variant">Deployed At:</span>
-        <span className="text-on-surface-variant">{deployment.deployedAt}</span>
+        <span className="text-on-surface-variant">Created:</span>
+        <span className="text-on-surface-variant">{formatTimestamp(deployment.createdAt)}</span>
       </div>
+      {deployment.prUrl && (
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">PR:</span>
+          <a href={deployment.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#{deployment.prNumber}</a>
+        </div>
+      )}
     </div>
     <div className="mt-4 pt-4 border-t border-outline/20 flex gap-2 justify-end">
         <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewDetails(deployment)}>Manage</Button>
@@ -59,6 +68,77 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
 );
 
 const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs }) => {
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadDeployments = async () => {
+      if (!auth.currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const userDeployments = await getDeployments(auth.currentUser.uid);
+        setDeployments(userDeployments);
+      } catch (err: any) {
+        console.error('Failed to load deployments:', err);
+        setError(err.message || 'Failed to load deployments');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDeployments();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full animate-fade-in-up">
+        <div className="flex-shrink-0">
+          <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center mb-8">
+            <div className="text-center md:text-left">
+                <h1 className="text-3xl font-bold text-on-background">Deployments</h1>
+                <p className="text-on-surface-variant mt-1">Manage and monitor all your project deployments.</p>
+            </div>
+            <Button variant="filled" icon={<Icons.Plus size={16}/>} className="w-full md:w-auto" onClick={onNewDeployment}>New Deployment</Button>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Icons.Spinner size={48} className="animate-spin mx-auto mb-4 text-primary" />
+            <p className="text-on-surface-variant">Loading deployments...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col h-full animate-fade-in-up">
+        <div className="flex-shrink-0">
+          <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center mb-8">
+            <div className="text-center md:text-left">
+                <h1 className="text-3xl font-bold text-on-background">Deployments</h1>
+                <p className="text-on-surface-variant mt-1">Manage and monitor all your project deployments.</p>
+            </div>
+            <Button variant="filled" icon={<Icons.Plus size={16}/>} className="w-full md:w-auto" onClick={onNewDeployment}>New Deployment</Button>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <Card className="p-6 text-center">
+            <Icons.XCircle size={48} className="text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-medium text-on-surface mb-2">Error Loading Deployments</h2>
+            <p className="text-on-surface-variant mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -72,47 +152,60 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
       </div>
       
       <div className="flex-1 overflow-y-auto">
-        {/* Mobile View: List of Cards */}
-        <div className="md:hidden">
-          {mockDeployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
-        </div>
+        {deployments.length === 0 ? (
+          <Card className="p-8 text-center">
+            <Icons.NewDeployment size={64} className="text-on-surface-variant mx-auto mb-4" />
+            <h2 className="text-xl font-medium text-on-surface mb-2">No Deployments Yet</h2>
+            <p className="text-on-surface-variant mb-6">Start by creating your first deployment.</p>
+            <Button onClick={onNewDeployment}>Create First Deployment</Button>
+          </Card>
+        ) : (
+          <>
+            {/* Mobile View: List of Cards */}
+            <div className="md:hidden">
+              {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
+            </div>
 
-        {/* Desktop View: Table */}
-        <Card className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="border-b border-outline/30">
-              <tr>
-                <th className="p-4 text-sm font-medium text-on-surface-variant">Repository</th>
-                <th className="p-4 text-sm font-medium text-on-surface-variant">Status</th>
-                <th className="p-4 text-sm font-medium text-on-surface-variant">URL</th>
-                <th className="p-4 text-sm font-medium text-on-surface-variant">Deployed At</th>
-                <th className="p-4 text-sm font-medium text-on-surface-variant">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mockDeployments.map((dep) => (
-                <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
-                  <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
-                  <td className="p-4"><StatusBadge status={dep.status} /></td>
-                  <td className="p-4">
-                    {dep.url !== '-' ? (
-                      <a href={dep.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{dep.url}</a>
-                    ) : (
-                      <span className="text-on-surface-variant">-</span>
-                    )}
-                  </td>
-                  <td className="p-4 text-on-surface-variant">{dep.deployedAt}</td>
-                  <td className="p-4">
-                    <div className="flex gap-2">
-                      <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Manage</Button>
-                      <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewLogs(dep)}>Logs</Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+            {/* Desktop View: Table */}
+            <Card className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="border-b border-outline/30">
+                  <tr>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">Repository</th>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">Language</th>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">Status</th>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">URL</th>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">Created</th>
+                    <th className="p-4 text-sm font-medium text-on-surface-variant">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deployments.map((dep) => (
+                    <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
+                      <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
+                      <td className="p-4 text-on-surface-variant">{dep.language || 'Unknown'}/{dep.framework || 'Unknown'}</td>
+                      <td className="p-4"><StatusBadge status={dep.status} /></td>
+                      <td className="p-4">
+                        {dep.deploymentUrl ? (
+                          <a href={dep.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{dep.deploymentUrl}</a>
+                        ) : (
+                          <span className="text-on-surface-variant">-</span>
+                        )}
+                      </td>
+                      <td className="p-4 text-on-surface-variant">{formatTimestamp(dep.createdAt)}</td>
+                      <td className="p-4">
+                        <div className="flex gap-2">
+                          <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Manage</Button>
+                          <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewLogs(dep)}>Logs</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </>
+        )}
       </div>
     </div>
   );

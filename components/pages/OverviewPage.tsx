@@ -1,17 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-
-const data = [
-  { name: 'Mon', deployments: 4, builds: 12 },
-  { name: 'Tue', deployments: 3, builds: 15 },
-  { name: 'Wed', deployments: 5, builds: 10 },
-  { name: 'Thu', deployments: 2, builds: 18 },
-  { name: 'Fri', deployments: 6, builds: 20 },
-  { name: 'Sat', deployments: 8, builds: 24 },
-  { name: 'Sun', deployments: 7, builds: 22 },
-];
+import { getDeploymentStats, getRecentActivity } from '../../services/firestore';
+import { formatTimestamp } from '../../services/utils';
+import { auth } from '../../services/firebase';
 
 const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode; color: string; }> = ({ title, value, icon, color }) => (
     <Card className="flex items-center p-6">
@@ -26,6 +19,76 @@ const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode; 
 )
 
 const OverviewPage: React.FC = () => {
+  const [stats, setStats] = useState({ total: 0, deployed: 0, failed: 0, inProgress: 0 });
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      if (!auth.currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const [statsData, activityData] = await Promise.all([
+          getDeploymentStats(auth.currentUser.uid),
+          getRecentActivity(auth.currentUser.uid, 10)
+        ]);
+        
+        setStats(statsData);
+        setRecentActivity(activityData);
+      } catch (error) {
+        console.error('Failed to load overview data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // Generate chart data from recent activity
+  const generateChartData = () => {
+    const last7Days = [];
+    const today = new Date();
+    
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+      
+      const dayActivity = recentActivity.filter(activity => {
+        const activityDate = activity.createdAt?.toDate ? activity.createdAt.toDate() : new Date(activity.createdAt);
+        return activityDate.toDateString() === date.toDateString();
+      });
+      
+      last7Days.push({
+        name: dayName,
+        deployments: dayActivity.filter(a => a.status === 'deployed').length,
+        builds: dayActivity.length
+      });
+    }
+    
+    return last7Days;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full animate-fade-in-up">
+        <div className="flex-shrink-0">
+          <h1 className="text-3xl font-bold text-on-background mb-8">Overview</h1>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Icons.Spinner size={48} className="animate-spin mx-auto mb-4 text-primary" />
+            <p className="text-on-surface-variant">Loading overview...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -34,17 +97,17 @@ const OverviewPage: React.FC = () => {
       
       <div className="flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatCard title="Total Deployments" value="128" icon={<Icons.Deployments size={24} className="text-on-primary-container"/>} color="bg-primary-container" />
-          <StatCard title="Successful Builds" value="1,204" icon={<Icons.CheckCircle size={24} className="text-green-800"/>} color="bg-green-100" />
-          <StatCard title="Failed Builds" value="12" icon={<Icons.XCircle size={24} className="text-on-error-container"/>} color="bg-error-container" />
-          <StatCard title="Connected Repos" value="8" icon={<Icons.GitHub size={24} className="text-on-secondary-container"/>} color="bg-secondary-container" />
+          <StatCard title="Total Deployments" value={stats.total.toString()} icon={<Icons.Deployments size={24} className="text-on-primary-container"/>} color="bg-primary-container" />
+          <StatCard title="Successful Deployments" value={stats.deployed.toString()} icon={<Icons.CheckCircle size={24} className="text-green-800"/>} color="bg-green-100" />
+          <StatCard title="Failed Deployments" value={stats.failed.toString()} icon={<Icons.XCircle size={24} className="text-on-error-container"/>} color="bg-error-container" />
+          <StatCard title="In Progress" value={stats.inProgress.toString()} icon={<Icons.Spinner size={24} className="text-blue-800"/>} color="bg-blue-100" />
         </div>
 
         <Card className="mb-8">
           <h2 className="text-xl font-medium text-on-surface mb-4">Activity This Week</h2>
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
-              <LineChart data={data} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+              <LineChart data={generateChartData()} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.1)" />
                 <XAxis dataKey="name" stroke="#79747E" />
                 <YAxis stroke="#79747E" />
@@ -61,36 +124,28 @@ const OverviewPage: React.FC = () => {
           <h2 className="text-xl font-medium text-on-surface mb-4">Recent Activity</h2>
           <Card>
               <ul className="divide-y divide-outline/30">
-                  <li className="flex items-center justify-between p-4">
-                      <div className="flex items-center">
-                          <Icons.NewDeployment size={20} className="text-primary mr-4"/>
-                          <div>
-                              <p className="font-medium">Deployment of `project-phoenix` successful.</p>
-                              <p className="text-sm text-on-surface-variant">2 minutes ago</p>
+                  {recentActivity.length === 0 ? (
+                    <li className="p-8 text-center text-on-surface-variant">
+                      No recent activity. Start your first deployment!
+                    </li>
+                  ) : (
+                    recentActivity.map((activity, index) => (
+                      <li key={activity.id || index} className="flex items-center justify-between p-4">
+                          <div className="flex items-center">
+                              <Icons.NewDeployment size={20} className="text-primary mr-4"/>
+                              <div>
+                                  <p className="font-medium">
+                                    {activity.status === 'deployed' ? `Deployment of \`${activity.repoName}\` successful.` :
+                                     activity.status === 'failed' ? `Deployment of \`${activity.repoName}\` failed.` :
+                                     `Deployment of \`${activity.repoName}\` ${activity.status}.`}
+                                  </p>
+                                  <p className="text-sm text-on-surface-variant">{formatTimestamp(activity.createdAt)}</p>
+                              </div>
                           </div>
-                      </div>
-                      <Icons.ChevronRight size={20} className="text-outline"/>
-                  </li>
-                  <li className="flex items-center justify-between p-4">
-                      <div className="flex items-center">
-                          <Icons.DevAI size={20} className="text-secondary mr-4"/>
-                          <div>
-                              <p className="font-medium">DevAI fixed 3 critical bugs in `web-app-v2`.</p>
-                              <p className="text-sm text-on-surface-variant">1 hour ago</p>
-                          </div>
-                      </div>
-                      <Icons.ChevronRight size={20} className="text-outline"/>
-                  </li>
-                  <li className="flex items-center justify-between p-4">
-                      <div className="flex items-center">
-                          <Icons.GitHub size={20} className="text-on-background mr-4"/>
-                          <div>
-                              <p className="font-medium">New repository `mobile-landing` connected.</p>
-                              <p className="text-sm text-on-surface-variant">4 hours ago</p>
-                          </div>
-                      </div>
-                      <Icons.ChevronRight size={20} className="text-outline"/>
-                  </li>
+                          <Icons.ChevronRight size={20} className="text-outline"/>
+                      </li>
+                    ))
+                  )}
               </ul>
           </Card>
         </div>

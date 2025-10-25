@@ -9,6 +9,32 @@ export interface Repository {
 
 export interface Deployment {
   id: string;
+  userId: string;
+  repoOwner: string;
+  repoName: string;
+  repoId: string;
+  status: 'detecting_language' | 'analyzing' | 'fixing' | 'deploying' | 'deployed' | 'failed';
+  language?: string;
+  framework?: string;
+  message: string;
+  julesSessionId?: string;
+  julesSessionUrl?: string;
+  prNumber?: number;
+  prUrl?: string;
+  prStatus?: 'open' | 'merged' | 'closed';
+  deploymentUrl?: string;
+  cloudRunServiceName?: string;
+  dockerImage?: string;
+  logs: string[];
+  errors: string[];
+  createdAt: any;
+  updatedAt: any;
+  completedAt?: any;
+}
+
+// Legacy deployment interface for backward compatibility
+export interface LegacyDeployment {
+  id: string;
   repoName: string;
   status: 'Deployed' | 'Building' | 'Failed';
   url: string;
@@ -23,6 +49,7 @@ export interface Log {
   user: string;
   action: string;
   details: string;
+  repoName?: string;
 }
 
 export interface ChatMessage {

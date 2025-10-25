@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
-import ConfirmationModal from './ui/ConfirmationModal';
 import { Icons } from './icons/Icons';
 import { Page } from '../types';
 import { signOutUser, signInWithGitHub } from '../services/firebase';
+import ConfirmationModal from './ui/ConfirmationModal';
 
 interface SidebarProps {
   activePage: Page;
@@ -40,7 +40,8 @@ const NavItem: React.FC<{
 );
 
 const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, isOpen, setIsOpen, userProp }) => {
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  
   const navItems = [
     { id: Page.Overview, label: 'Overview', icon: <Icons.Dashboard size={20} /> },
     { id: Page.NewDeployment, label: 'New Deployment', icon: <Icons.NewDeployment size={20} /> },
@@ -55,14 +56,21 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
     setIsOpen(false); // Close sidebar on mobile after navigation
   };
 
-  const handleLogout = () => {
-    setIsLogoutModalOpen(true);
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
   };
 
-  const confirmLogout = () => {
-    onLogout();
-    setIsLogoutModalOpen(false);
-    setIsOpen(false);
+  const handleLogoutConfirm = () => {
+    setShowLogoutModal(false);
+    // Sign out from Firebase and invoke parent logout
+    signOutUser().catch(e => console.error('Sign out error', e)).finally(() => {
+      onLogout();
+      setIsOpen(false);
+    });
+  };
+
+  const handleLogoutCancel = () => {
+    setShowLogoutModal(false);
   };
 
   const handleConnect = async () => {
@@ -82,29 +90,24 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
 
   return (
     <>
-      <ConfirmationModal
-        isOpen={isLogoutModalOpen}
-        onClose={() => setIsLogoutModalOpen(false)}
-        onConfirm={confirmLogout}
-        title="Confirm Logout"
-        message="Are you sure you want to sign out?"
-      />
       {/* Overlay */}
       <div
         className={`fixed inset-0 bg-black/40 z-30 transition-opacity md:hidden ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setIsOpen(false)}
       ></div>
 
-      <aside className={`w-64 bg-surface p-4 flex flex-col border-r border-outline/20 fixed top-0 left-0 h-full z-40 transition-transform transform md:relative md:translate-x-0 md:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center gap-2 p-3 mb-6">
-          <div className="p-2 bg-primary rounded-lg">
-            <Icons.Code size={24} className="text-on-primary" />
+      <aside className={`w-64 bg-surface flex flex-col border-r border-outline/20 fixed top-0 left-0 h-full z-40 transition-transform transform md:relative md:translate-x-0 md:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-4 border-b border-outline/20">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-primary rounded-lg">
+              <Icons.Code size={24} className="text-on-primary" />
+            </div>
+            <h1 className="text-xl font-bold text-primary">Devyntra</h1>
           </div>
-          <h1 className="text-xl font-bold text-primary">Devyntra</h1>
         </div>
 
-        <nav className="flex-1">
-          <ul className="space-y-2">
+        <nav className="flex-1 p-4 overflow-y-auto">
+          <ul className="space-y-1">
             {navItems.map((item) => (
               <NavItem
                 key={item.id}
@@ -117,14 +120,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
           </ul>
         </nav>
 
-        <div>
-          <div className="p-3 mb-2">
-            <div className="flex items-center">
-              <img src={user?.photoURL || 'https://picsum.photos/40/40'} alt="User Avatar" className="w-10 h-10 rounded-full mr-3 flex-shrink-0" />
-              <div className="min-w-0 w-full max-w-full overflow-hidden">
-                <p className="font-medium text-on-surface truncate">{user?.displayName ?? (localStorage.getItem('github_email')?.split('@')[0]) ?? 'Unnamed'}</p>
-                <p className="text-sm text-on-surface-variant truncate">{user?.email ?? localStorage.getItem('github_email') ?? 'Not connected'}</p>
-              </div>
+        <div className="p-4 border-t border-outline/20">
+          <div className="flex items-center mb-3">
+            <img src={user?.photoURL || 'https://picsum.photos/40/40'} alt="User Avatar" className="w-8 h-8 rounded-full mr-3" />
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-on-surface text-sm truncate">{user?.displayName ?? (localStorage.getItem('github_email')?.split('@')[0]) ?? 'Unnamed'}</p>
+              <p className="text-xs text-on-surface-variant truncate">{user?.email ?? localStorage.getItem('github_email') ?? 'Not connected'}</p>
             </div>
           </div>
           <ul>
@@ -133,7 +134,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
                 icon={<Icons.Logout size={20} />}
                 label="Logout"
                 isActive={false}
-                onClick={handleLogout}
+                onClick={handleLogoutClick}
               />
             ) : (
               <NavItem
@@ -146,6 +147,14 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
           </ul>
         </div>
       </aside>
+      
+      <ConfirmationModal
+        isOpen={showLogoutModal}
+        onClose={handleLogoutCancel}
+        onConfirm={handleLogoutConfirm}
+        title="Confirm Logout"
+        message="Are you sure you want to logout? You'll need to reconnect your GitHub account to continue using Devyntra."
+      />
     </>
   );
 };

@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 import { fetchUserRepos } from '../../services/github';
+import { startDeployment, watchDeployment } from '../../services/firestore';
 
 const mockRepos: Repository[] = [
   { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
@@ -68,41 +69,91 @@ const NewDeploymentPage: React.FC = () => {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState<boolean>(true);
+  const [deploymentId, setDeploymentId] = useState<string | null>(null);
 
-  const runDeployment = useCallback(() => {
+  const runDeployment = useCallback(async () => {
+    if (!selectedRepo || !repos) return;
+    
+    const selectedRepoData = repos.find(repo => repo.id === selectedRepo);
+    if (!selectedRepoData) return;
+
     setShowInstructions(false);
     setIsDeploying(true);
     setDeployedUrl(null);
     setDeploymentSteps(initialSteps);
     setCurrentStepIndex(0);
-  }, []);
 
-  useEffect(() => {
-    if (!isDeploying || currentStepIndex >= deploymentSteps.length) {
-        if(currentStepIndex >= deploymentSteps.length) {
-            setIsDeploying(false);
-            setDeployedUrl(`https://project-phoenix-xyz123.run.app`);
-        }
-      return;
+    try {
+      console.log('Starting deployment for:', selectedRepoData);
+      // Call real Cloud Function
+      const result = await startDeployment(selectedRepoData.id, selectedRepoData.owner, selectedRepoData.name);
+      console.log('Deployment started successfully:', result);
+      setDeploymentId(result.deploymentId);
+    } catch (error) {
+      console.error('Failed to start deployment:', error);
+      setIsDeploying(false);
+      alert(`Deployment failed: ${error.message}`);
     }
+  }, [selectedRepo, repos]);
 
-    // Mark current step as in-progress
-    setDeploymentSteps(prev => prev.map((step, index) => 
-        index === currentStepIndex ? { ...step, status: 'in-progress', details: 'Working on it...' } : step
-    ));
-    
-    // Simulate async work
-    const timer = setTimeout(() => {
-      // Mark current step as success
-       setDeploymentSteps(prev => prev.map((step, index) => 
-        index === currentStepIndex ? { ...step, status: 'success', details: 'Completed successfully.' } : step
-      ));
-      // Move to next step
-      setCurrentStepIndex(prev => prev + 1);
-    }, 1500 + Math.random() * 1000);
+  // Watch deployment progress in real-time
+  useEffect(() => {
+    if (!deploymentId) return;
 
-    return () => clearTimeout(timer);
-  }, [isDeploying, currentStepIndex, deploymentSteps.length]);
+    const unsubscribe = watchDeployment(deploymentId, (deployment) => {
+      console.log('Received deployment update:', deployment);
+      if (!deployment) {
+        console.log('No deployment data received');
+        return;
+      }
+
+      // Update steps based on deployment status
+      let newSteps = [...deploymentSteps];
+      let newCurrentStepIndex = currentStepIndex;
+
+      switch (deployment.status) {
+        case 'detecting_language':
+          newSteps[0] = { ...newSteps[0], status: 'in-progress', details: deployment.message };
+          newCurrentStepIndex = 0;
+          break;
+        case 'analyzing':
+          newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
+          newSteps[1] = { ...newSteps[1], status: 'in-progress', details: deployment.message };
+          newCurrentStepIndex = 1;
+          break;
+        case 'fixing':
+          newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
+          newSteps[1] = { ...newSteps[1], status: 'success', details: 'Analysis complete' };
+          newSteps[2] = { ...newSteps[2], status: 'in-progress', details: deployment.message };
+          newCurrentStepIndex = 2;
+          break;
+        case 'deploying':
+          newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
+          newSteps[1] = { ...newSteps[1], status: 'success', details: 'Analysis complete' };
+          newSteps[2] = { ...newSteps[2], status: 'success', details: 'Fixes applied' };
+          newSteps[3] = { ...newSteps[3], status: 'in-progress', details: 'Setting up CI/CD pipeline...' };
+          newSteps[4] = { ...newSteps[4], status: 'in-progress', details: 'Installing dependencies...' };
+          newSteps[5] = { ...newSteps[5], status: 'in-progress', details: 'Creating Docker image...' };
+          newSteps[6] = { ...newSteps[6], status: 'in-progress', details: deployment.message };
+          newCurrentStepIndex = 6;
+          break;
+        case 'deployed':
+          newSteps = newSteps.map(step => ({ ...step, status: 'success', details: 'Completed successfully' }));
+          setDeployedUrl(deployment.deploymentUrl || 'https://deployment-complete.run.app');
+          setIsDeploying(false);
+          break;
+        case 'failed':
+          newSteps[newCurrentStepIndex] = { ...newSteps[newCurrentStepIndex], status: 'error', details: deployment.message };
+          setIsDeploying(false);
+          break;
+      }
+
+      setDeploymentSteps(newSteps);
+      setCurrentStepIndex(newCurrentStepIndex);
+    });
+
+    return () => unsubscribe();
+  }, [deploymentId]);
 
   useEffect(() => {
     let mounted = true;

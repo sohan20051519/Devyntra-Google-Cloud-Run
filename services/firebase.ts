@@ -105,6 +105,25 @@ export async function signInWithGitHub() {
       console.warn('Failed to persist github token/email to localStorage', e);
     }
 
+    // Store in Firestore for Cloud Functions to access
+    if (accessToken && user) {
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('./firestore');
+        
+        await setDoc(doc(db, 'users', user.uid), {
+          githubToken: accessToken,
+          email: finalEmail,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          githubProfile: githubProfile,
+          updatedAt: new Date(),
+        });
+      } catch (e) {
+        console.warn('Failed to store GitHub token in Firestore', e);
+      }
+    }
+
     return { accessToken, user, githubProfile, email: finalEmail };
   } catch (error) {
     console.error('GitHub sign-in failed', error);
