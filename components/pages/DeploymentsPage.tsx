@@ -5,7 +5,7 @@ import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
 import { getDeployments } from '../../services/firestore';
 import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
-import { auth } from '../../services/firebase';
+import { auth, reauthorizeWithGitHub } from '../../services/firebase';
 
 interface DeploymentsPageProps {
   onViewDetails: (deployment: Deployment) => void;
@@ -30,13 +30,30 @@ const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => 
   }
 };
 
-const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onViewDetails, onViewLogs }) => (
-  <Card className="mb-4">
-    <div className="flex justify-between items-start">
-      <span className="font-medium text-on-surface">{deployment.repoName}</span>
-      <StatusBadge status={deployment.status} />
-    </div>
-    <div className="mt-4 space-y-2 text-sm">
+const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; onReauthorize: () => void; }> = ({ deployment, onViewDetails, onViewLogs, onReauthorize }) => {
+  const needsReauthorization = deployment.status === 'failed' && deployment.statusReason?.includes('Failed to automatically setup GitHub secrets');
+
+  return (
+    <Card className="mb-4">
+      <div className="flex justify-between items-start">
+        <span className="font-medium text-on-surface">{deployment.repoName}</span>
+        <StatusBadge status={deployment.status} />
+      </div>
+      {needsReauthorization && (
+        <div className="mt-2 text-xs text-red-700 p-2 bg-red-50 rounded-md">
+          <strong>Permission Issue:</strong> Could not set up GitHub secrets. You may need to grant access to the organization that owns this repository.
+          <Button
+            variant="outlined"
+            size="sm"
+            className="w-full mt-2"
+            onClick={onReauthorize}
+            icon={<Icons.GitHub size={14} />}
+          >
+            Re-authorize with GitHub
+          </Button>
+        </div>
+      )}
+      <div className="mt-4 space-y-2 text-sm">
       <div className="flex justify-between">
         <span className="text-on-surface-variant">Language:</span>
         <span className="text-on-surface-variant">{deployment.language || 'Unknown'}/{deployment.framework || 'Unknown'}</span>
@@ -71,25 +88,40 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reauthorizationStatus, setReauthorizationStatus] = useState<'idle' | 'authorizing' | 'success' | 'error'>('idle');
+
+  const handleReauthorize = async () => {
+    setReauthorizationStatus('authorizing');
+    try {
+      await reauthorizeWithGitHub();
+      setReauthorizationStatus('success');
+      // Optionally, trigger a refresh of deployments or the specific deployment
+      loadDeployments();
+    } catch (err) {
+      console.error('Re-authorization failed:', err);
+      setReauthorizationStatus('error');
+    }
+  };
+
+  const loadDeployments = async () => {
+    if (!auth.currentUser) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const userDeployments = await getDeployments(auth.currentUser.uid);
+      setDeployments(userDeployments);
+    } catch (err: any) {
+      console.error('Failed to load deployments:', err);
+      setError(err.message || 'Failed to load deployments');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadDeployments = async () => {
-      if (!auth.currentUser) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const userDeployments = await getDeployments(auth.currentUser.uid);
-        setDeployments(userDeployments);
-      } catch (err: any) {
-        console.error('Failed to load deployments:', err);
-        setError(err.message || 'Failed to load deployments');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadDeployments();
   }, []);
 
@@ -161,9 +193,21 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
           </Card>
         ) : (
           <>
+            {/* Reauthorization status message */}
+            {reauthorizationStatus === 'success' && (
+              <div className="mb-4 p-3 bg-green-100 text-green-800 text-sm rounded-md">
+                Successfully re-authorized. Please try deploying again.
+              </div>
+            )}
+            {reauthorizationStatus === 'error' && (
+              <div className="mb-4 p-3 bg-red-100 text-red-800 text-sm rounded-md">
+                Re-authorization failed. Please try again or contact support.
+              </div>
+            )}
+
             {/* Mobile View: List of Cards */}
             <div className="md:hidden">
-              {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} />)}
+              {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} onReauthorize={handleReauthorize} />)}
             </div>
 
             {/* Desktop View: Table */}
@@ -180,12 +224,19 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                   </tr>
                 </thead>
                 <tbody>
-                  {deployments.map((dep) => (
-                    <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
-                      <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
-                      <td className="p-4 text-on-surface-variant">{dep.language || 'Unknown'}/{dep.framework || 'Unknown'}</td>
-                      <td className="p-4"><StatusBadge status={dep.status} /></td>
-                      <td className="p-4">
+                  {deployments.map((dep) => {
+                    const needsReauthorization = dep.status === 'failed' && dep.statusReason?.includes('Failed to automatically setup GitHub secrets');
+                    return (
+                      <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
+                        <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
+                        <td className="p-4 text-on-surface-variant">{dep.language || 'Unknown'}/{dep.framework || 'Unknown'}</td>
+                        <td className="p-4">
+                          <StatusBadge status={dep.status} />
+                          {needsReauthorization && (
+                            <p className="mt-1 text-xs text-red-700">Permission issue</p>
+                          )}
+                        </td>
+                        <td className="p-4">
                         {dep.deploymentUrl ? (
                           <a href={dep.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{dep.deploymentUrl}</a>
                         ) : (
@@ -195,12 +246,20 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                       <td className="p-4 text-on-surface-variant">{formatTimestamp(dep.createdAt)}</td>
                       <td className="p-4">
                         <div className="flex gap-2">
-                          <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Manage</Button>
-                          <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewLogs(dep)}>Logs</Button>
+                          {needsReauthorization ? (
+                            <Button variant="outlined" size="sm" className="whitespace-nowrap" onClick={handleReauthorize} icon={<Icons.GitHub size={14} />}>
+                              Re-authorize
+                            </Button>
+                          ) : (
+                            <>
+                              <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewDetails(dep)}>Manage</Button>
+                              <Button variant="text" className="px-2 py-1 h-auto text-xs" onClick={() => onViewLogs(dep)}>Logs</Button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </Card>
