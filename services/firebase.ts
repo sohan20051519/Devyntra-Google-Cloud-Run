@@ -32,11 +32,8 @@ export async function signInWithGitHub() {
   provider.addScope('read:org');
   provider.addScope('read:email');
 
-  // Force re-consent to allow selecting organization access.
-  provider.setCustomParameters({
-    allow_signup: 'true',
-    prompt: 'consent',
-  });
+  // Optionally force re-consent to allow selecting organization access, etc.
+  provider.setCustomParameters({ allow_signup: 'true' });
 
   try {
     const result: UserCredential = await signInWithPopup(auth, provider);
@@ -186,3 +183,60 @@ export async function checkGitHubTokenStatus() {
 }
 
 export { auth };
+
+/**
+ * reauthorizeWithGitHub
+ * - Forces a re-authentication with GitHub to request organization access.
+ */
+export async function reauthorizeWithGitHub() {
+  const provider = new GithubAuthProvider();
+
+  // Request the scopes needed by Jules
+  provider.addScope('user');
+  provider.addScope('repo');
+  provider.addScope('workflow');
+  provider.addScope('admin:repo_hook');
+  provider.addScope('read:project');
+  provider.addScope('read:org');
+  provider.addScope('read:email');
+
+  // Force re-consent to allow selecting organization access.
+  provider.setCustomParameters({
+    prompt: 'consent',
+  });
+
+  try {
+    const result: UserCredential = await signInWithPopup(auth, provider);
+    // GitHub OAuth access token
+    // @ts-ignore - token is on the credential's accessToken in providerData
+    const credential: any = GithubAuthProvider.credentialFromResult(result);
+    const accessToken = credential?.accessToken;
+
+    // Basic user info
+    const user = result.user;
+
+    // Persist token locally for UI convenience
+    if (accessToken) {
+      localStorage.setItem('github_access_token', accessToken);
+    }
+
+    // Update token in Firestore for Cloud Functions to access
+    if (accessToken && user) {
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('./firestore');
+
+        await setDoc(doc(db, 'users', user.uid), {
+          githubToken: accessToken,
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to update GitHub token in Firestore', e);
+      }
+    }
+
+    return { accessToken, user };
+  } catch (error) {
+    console.error('GitHub re-authorization failed', error);
+    throw error;
+  }
+}
