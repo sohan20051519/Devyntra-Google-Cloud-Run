@@ -90,25 +90,11 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
   const [error, setError] = useState<string | null>(null);
   const [reauthorizationStatus, setReauthorizationStatus] = useState<'idle' | 'authorizing' | 'success' | 'error'>('idle');
 
-  const handleReauthorize = async () => {
-    setReauthorizationStatus('authorizing');
-    try {
-      await reauthorizeWithGitHub();
-      setReauthorizationStatus('success');
-      // Optionally, trigger a refresh of deployments or the specific deployment
-      loadDeployments();
-    } catch (err) {
-      console.error('Re-authorization failed:', err);
-      setReauthorizationStatus('error');
-    }
-  };
-
   const loadDeployments = async () => {
     if (!auth.currentUser) {
       setLoading(false);
       return;
     }
-
     try {
       setLoading(true);
       const userDeployments = await getDeployments(auth.currentUser.uid);
@@ -121,7 +107,40 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
     }
   };
 
+  const handleReauthorize = async () => {
+    setReauthorizationStatus('authorizing');
+    try {
+      await reauthorizeWithGitHub();
+      setReauthorizationStatus('success');
+      // Refresh deployments to reflect any potential fixes
+      await loadDeployments();
+    } catch (err) {
+      console.error('Re-authorization failed:', err);
+      setReauthorizationStatus('error');
+    }
+  };
+
   useEffect(() => {
+    loadDeployments();
+  }, []);
+
+  if (loading) {
+      if (!auth.currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const userDeployments = await getDeployments(auth.currentUser.uid);
+        setDeployments(userDeployments);
+      } catch (err: any) {
+        console.error('Failed to load deployments:', err);
+        setError(err.message || 'Failed to load deployments');
+      } finally {
+        setLoading(false);
+      }
+    };
+
     loadDeployments();
   }, []);
 
