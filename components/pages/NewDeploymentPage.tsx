@@ -94,7 +94,19 @@ const NewDeploymentPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to start deployment:', error);
       setIsDeploying(false);
-      alert(`Deployment failed: ${error.message}`);
+      
+      // Show more detailed error information
+      let errorMessage = 'Deployment failed: ';
+      if (error.message) {
+        errorMessage += error.message;
+      } else if (typeof error === 'string') {
+        errorMessage += error;
+      } else {
+        errorMessage += 'Unknown error occurred';
+      }
+      
+      // Show error in a more user-friendly way
+      alert(errorMessage);
     }
   }, [selectedRepo, repos]);
 
@@ -164,11 +176,21 @@ const NewDeploymentPage: React.FC = () => {
           break;
         case 'deployed':
           newSteps = newSteps.map(step => ({ ...step, status: 'success', details: 'Completed successfully' }));
-          setDeployedUrl(deployment.deploymentUrl || 'https://deployment-complete.run.app');
+          // Only set URL if we have a real deployment URL
+          if (deployment.deploymentUrl) {
+            setDeployedUrl(deployment.deploymentUrl);
+          }
           setIsDeploying(false);
           break;
         case 'failed':
-          newSteps[newCurrentStepIndex] = { ...newSteps[newCurrentStepIndex], status: 'error', details: deployment.message };
+          // Mark the current step as failed and show error details
+          if (newCurrentStepIndex < newSteps.length) {
+            newSteps[newCurrentStepIndex] = { ...newSteps[newCurrentStepIndex], status: 'error', details: deployment.message };
+          }
+          // Also show any error details from the deployment
+          if (deployment.errors && deployment.errors.length > 0) {
+            console.error('Deployment errors:', deployment.errors);
+          }
           setIsDeploying(false);
           break;
       }
@@ -219,8 +241,8 @@ const NewDeploymentPage: React.FC = () => {
           }
         </p>
         
-        {/* GitHub Authentication Status */}
-        {githubTokenStatus && (
+        {/* GitHub Authentication Status - Only show when not authenticated and not deploying */}
+        {githubTokenStatus && !githubTokenStatus.hasToken && !isDeploying && (
           <Card className="mb-6">
             <div className="p-4">
               <div className="flex items-center justify-between">
@@ -229,22 +251,17 @@ const NewDeploymentPage: React.FC = () => {
                   <div>
                     <h3 className="text-lg font-medium text-on-surface">GitHub Authentication</h3>
                     <p className="text-sm text-on-surface-variant">
-                      {githubTokenStatus.hasToken 
-                        ? '✅ Connected - Ready to deploy' 
-                        : '❌ Not connected - Please authenticate to deploy'
-                      }
+                      ❌ Not connected - Please authenticate to deploy
                     </p>
                   </div>
                 </div>
-                {!githubTokenStatus.hasToken && (
-                  <Button 
-                    onClick={reAuthenticateGitHub}
-                    variant="primary"
-                    size="sm"
-                  >
-                    Connect GitHub
-                  </Button>
-                )}
+                <Button 
+                  onClick={reAuthenticateGitHub}
+                  variant="primary"
+                  size="sm"
+                >
+                  Connect GitHub
+                </Button>
               </div>
             </div>
           </Card>
@@ -292,7 +309,7 @@ const NewDeploymentPage: React.FC = () => {
             )}
 
             {/* Show progress/result if deploying or deployment is complete */}
-            {(isDeploying || deployedUrl) && (
+            {(isDeploying || deployedUrl || (deploymentId && !isDeploying && !deployedUrl)) && (
               <div className="animate-fade-in-up">
                 {deployedUrl && (
                   <Card className="p-6 mb-8">
@@ -305,6 +322,26 @@ const NewDeploymentPage: React.FC = () => {
                               <button onClick={() => navigator.clipboard.writeText(deployedUrl)} className="text-on-surface-variant hover:text-primary">
                                   <Icons.Copy size={16} />
                               </button>
+                          </div>
+                      </div>
+                  </Card>
+                )}
+
+                {/* Show failure message if deployment failed */}
+                {deploymentId && !isDeploying && !deployedUrl && deploymentSteps.some(step => step.status === 'error') && (
+                  <Card className="p-6 mb-8">
+                      <div className="text-center">
+                          <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
+                          <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
+                          <p className="text-on-surface-variant mb-4">The deployment encountered an error. Please check the details below and try again.</p>
+                          <div className="text-left bg-error-container/20 p-4 rounded-lg">
+                              <p className="text-sm text-error font-medium mb-2">Common causes:</p>
+                              <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
+                                  <li><strong>Automatic setup failed:</strong> DevYntra tried to configure secrets automatically but encountered an issue</li>
+                                  <li><strong>Repository permissions:</strong> Ensure DevYntra has admin access to your repository</li>
+                                  <li><strong>Build errors:</strong> TypeScript errors, missing dependencies, or lockfile issues</li>
+                                  <li><strong>GitHub API limits:</strong> Check if you've hit GitHub API rate limits</li>
+                              </ul>
                           </div>
                       </div>
                   </Card>
