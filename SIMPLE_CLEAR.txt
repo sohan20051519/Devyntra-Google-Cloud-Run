@@ -1,0 +1,56 @@
+==========================================
+SIMPLE 3-STEP INSTRUCTIONS TO CLEAR NOW:
+==========================================
+
+1. Go to your DevYntra app in your browser
+   (the one you're using right now)
+
+2. Press F12 to open the Developer Console
+
+3. Copy and paste this ENTIRE code block and press Enter:
+
+---
+(async () => {
+  try {
+    console.log('Connecting to Firebase...');
+    const firestore = await import('./services/firestore');
+    const { db, getFirestore, collection, query, where, getDocs, deleteDoc } = firestore;
+    
+    const deploymentsRef = collection(db, 'deployments');
+    const q = query(deploymentsRef, where('status', '==', 'failed'));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      alert('✓ No failed deployments found.');
+      return;
+    }
+    
+    const count = snapshot.size;
+    console.log(`Found ${count} failed deployments`);
+    
+    if (!confirm(`Delete ${count} failed deployment(s) from Firebase?`)) {
+      console.log('Cancelled');
+      return;
+    }
+    
+    console.log('Deleting...');
+    const deletes = snapshot.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(deletes);
+    
+    console.log(`✓ Successfully deleted ${count} failed deployment(s)!`);
+    alert(`✓ Successfully cleared ${count} failed deployment(s)!`);
+    
+    setTimeout(() => location.reload(), 1000);
+  } catch (error) {
+    console.error('Error:', error);
+    alert('Error: ' + error.message);
+  }
+})();
+---
+
+That's it! The page will reload automatically.
+
+==========================================
+
+
+

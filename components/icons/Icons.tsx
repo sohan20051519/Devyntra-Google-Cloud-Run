@@ -22,6 +22,7 @@ import {
   PackageCheck,
   Menu,
   ArrowLeft,
+  Key,
 } from 'lucide-react';
 
 export const Icons = {
@@ -47,4 +48,5 @@ export const Icons = {
   Package: PackageCheck,
   Menu: Menu,
   ArrowLeft: ArrowLeft,
+  Key: Key,
 };

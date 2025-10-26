@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, onSnapshot, query, where, orderBy, limit, getDocs, addDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, query, where, orderBy, limit, getDocs, addDoc, updateDoc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { Deployment } from '../types';
 
 // Firebase config
@@ -15,6 +15,32 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+
+// Get GitHub token from localStorage or Firestore
+const getGitHubToken = async (): Promise<string> => {
+  // First try localStorage
+  const localToken = localStorage.getItem('github_access_token');
+  if (localToken) {
+    return localToken;
+  }
+
+  // If not in localStorage, try to get from Firestore
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User must be authenticated to get GitHub token');
+  }
+
+  const { doc, getDoc } = await import('firebase/firestore');
+  const userDoc = await getDoc(doc(db, 'users', user.uid));
+  const userData = userDoc.data();
+  
+  if (!userData?.githubToken) {
+    throw new Error('GitHub token not found. Please reconnect your GitHub account.');
+  }
+
+  return userData.githubToken;
+};
 
 // Start a new deployment (real implementation)
 export const startDeployment = async (repoId: string, repoOwner: string, repoName: string): Promise<{ deploymentId: string }> => {
@@ -36,7 +62,7 @@ export const startDeployment = async (repoId: string, repoOwner: string, repoNam
     console.log('Got ID token for authentication');
     
     // Call the Cloud Function via HTTP
-    const response = await fetch('https://startdeployment-mcwd6yzjia-uc.a.run.app', {
+    const response = await fetch('https://us-central1-devyntra-500e4.cloudfunctions.net/deploy', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +71,8 @@ export const startDeployment = async (repoId: string, repoOwner: string, repoNam
       body: JSON.stringify({
         repoId,
         repoOwner,
-        repoName
+        repoName,
+        githubToken: await getGitHubToken() // Add GitHub token
       })
     });
     
@@ -159,5 +186,39 @@ export const getRecentActivity = async (userId: string, limitCount: number = 10)
   } catch (error) {
     console.error('Error getting recent activity:', error);
     return [];
+  }
+};
+
+// Delete a specific deployment
+export const deleteDeployment = async (deploymentId: string) => {
+  try {
+    const deploymentRef = doc(db, 'deployments', deploymentId);
+    await deleteDoc(deploymentRef);
+    console.log('Deployment deleted:', deploymentId);
+    return true;
+  } catch (error) {
+    console.error('Error deleting deployment:', error);
+    throw error;
+  }
+};
+
+// Delete all failed deployments for a user
+export const deleteFailedDeployments = async (userId: string) => {
+  try {
+    const deploymentsRef = collection(db, 'deployments');
+    const q = query(
+      deploymentsRef,
+      where('userId', '==', userId),
+      where('status', '==', 'failed')
+    );
+    
+    const snapshot = await getDocs(q);
+    const deletePromises = snapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+    console.log(`Deleted ${deletePromises.length} failed deployments`);
+    return deletePromises.length;
+  } catch (error) {
+    console.error('Error deleting failed deployments:', error);
+    throw error;
   }
 };

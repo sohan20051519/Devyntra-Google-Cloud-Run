@@ -5,7 +5,9 @@ import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 import { fetchUserRepos, checkRepoPermission } from '../../services/github';
 import { startDeployment, watchDeployment } from '../../services/firestore';
-import { checkGitHubTokenStatus, signInWithGitHub } from '../../services/firebase';
+import { checkGitHubTokenStatus, signInWithGitHub, reauthorizeWithGitHub, forceManualGitHubReauth } from '../../services/firebase';
+import { Deployment } from '../../types';
+import Terminal from '../ui/Terminal';
 
 const mockRepos: Repository[] = [
   { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
@@ -23,7 +25,8 @@ interface DeploymentStep {
 }
 
 const initialSteps: DeploymentStep[] = [
-  { name: 'Detect Language & Framework', status: 'pending', details: 'Waiting to start...', icon: <Icons.Code size={24} /> },
+  { name: 'Inject Secrets', status: 'pending', details: 'Waiting to start...', icon: <Icons.Key size={24} /> },
+  { name: 'Detect Language & Framework', status: 'pending', details: 'Waiting for secrets...', icon: <Icons.Code size={24} /> },
   { name: 'Analyze Codebase', status: 'pending', details: 'Waiting for detection...', icon: <Icons.DevAI size={24} /> },
   { name: 'Fix Errors & Push Changes', status: 'pending', details: 'Waiting for analysis...', icon: <Icons.Wrench size={24} /> },
   { name: 'Setup CI/CD Pipeline', status: 'pending', details: 'Waiting for fixes...', icon: <Icons.GitHub size={24} /> },
@@ -74,6 +77,8 @@ const NewDeploymentPage: React.FC = () => {
   const [githubTokenStatus, setGithubTokenStatus] = useState<{ hasUser: boolean; hasToken: boolean } | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState<boolean>(false);
+  const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(null);
+  const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -146,6 +151,19 @@ const NewDeploymentPage: React.FC = () => {
         return;
       }
 
+      // Store current deployment
+      setCurrentDeployment(deployment);
+
+      // Add terminal logs based on deployment status
+      const addTerminalLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+        setTerminalLogs(prev => [...prev, {
+          id: Date.now().toString(),
+          timestamp: new Date().toLocaleTimeString(),
+          message,
+          type
+        }]);
+      };
+
       // Update steps based on deployment status
       let newSteps = [...deploymentSteps];
       let newCurrentStepIndex = currentStepIndex;
@@ -154,17 +172,21 @@ const NewDeploymentPage: React.FC = () => {
         case 'detecting_language':
           newSteps[0] = { ...newSteps[0], status: 'in-progress', details: deployment.message };
           newCurrentStepIndex = 0;
+          addTerminalLog('🔍 Starting language and framework detection...', 'info');
           break;
         case 'analyzing':
           newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
           newSteps[1] = { ...newSteps[1], status: 'in-progress', details: deployment.message };
           newCurrentStepIndex = 1;
+          addTerminalLog(`✅ Language detected: ${deployment.language || 'Unknown'}`, 'success');
+          addTerminalLog('🔍 Starting code analysis...', 'info');
           break;
         case 'fixing':
           newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
           newSteps[1] = { ...newSteps[1], status: 'success', details: 'Analysis complete' };
           newSteps[2] = { ...newSteps[2], status: 'in-progress', details: deployment.message };
           newCurrentStepIndex = 2;
+          addTerminalLog('⚠️ Code analysis found issues, starting Jules AI fixes...', 'warning');
           break;
         case 'deploying':
           newSteps[0] = { ...newSteps[0], status: 'success', details: 'Language detected' };
@@ -175,13 +197,17 @@ const NewDeploymentPage: React.FC = () => {
           newSteps[5] = { ...newSteps[5], status: 'in-progress', details: 'Creating Docker image...' };
           newSteps[6] = { ...newSteps[6], status: 'in-progress', details: deployment.message };
           newCurrentStepIndex = 6;
+          addTerminalLog('🚀 Starting deployment to Google Cloud Run...', 'info');
+          addTerminalLog('📦 Building Docker image...', 'info');
           break;
         case 'deployed':
           newSteps = newSteps.map(step => ({ ...step, status: 'success', details: 'Completed successfully' }));
           // Only set URL if we have a real deployment URL
           if (deployment.deploymentUrl) {
             setDeployedUrl(deployment.deploymentUrl);
+            addTerminalLog(`🌐 Service URL: ${deployment.deploymentUrl}`, 'success');
           }
+          addTerminalLog('✅ Deployment completed successfully!', 'success');
           setIsDeploying(false);
           break;
         case 'failed':
@@ -193,6 +219,7 @@ const NewDeploymentPage: React.FC = () => {
           if (deployment.errors && deployment.errors.length > 0) {
             console.error('Deployment errors:', deployment.errors);
           }
+          addTerminalLog(`❌ Deployment failed: ${deployment.message}`, 'error');
           setIsDeploying(false);
           break;
       }
@@ -360,24 +387,91 @@ const NewDeploymentPage: React.FC = () => {
                 )}
 
                 {/* Show failure message if deployment failed */}
-                {deploymentId && !isDeploying && !deployedUrl && deploymentSteps.some(step => step.status === 'error') && (
-                  <Card className="p-6 mb-8">
+                {deploymentId && !isDeploying && !deployedUrl && deploymentSteps.some(step => step.status === 'error') && (() => {
+                  const needsReauthorization = currentDeployment?.status === 'failed' && (
+                    currentDeployment.statusReason?.includes('Failed to automatically setup GitHub secrets') ||
+                    currentDeployment.statusReason?.includes('Organization approval required') ||
+                    currentDeployment.statusReason?.includes('Repository permissions denied') ||
+                    currentDeployment.statusReason?.includes('requires approval')
+                  );
+
+                  const handleReauthorize = async () => {
+                    try {
+                      await reauthorizeWithGitHub();
+                      alert('Re-authorization successful! Please try deploying again.');
+                      // Reset deployment to allow retry
+                      setDeploymentId(null);
+                      setIsDeploying(false);
+                      setCurrentDeployment(null);
+                      setDeploymentSteps(initialSteps);
+                      setCurrentStepIndex(0);
+                    } catch (error) {
+                      console.error('Re-authorization failed:', error);
+                      alert('Re-authorization failed. Please try again.');
+                    }
+                  };
+
+                  const handleClearCacheAndReauth = async () => {
+                    try {
+                      await forceManualGitHubReauth();
+                      alert('Cache cleared! Please try deploying again.');
+                      // Reset deployment to allow retry
+                      setDeploymentId(null);
+                      setIsDeploying(false);
+                      setCurrentDeployment(null);
+                      setDeploymentSteps(initialSteps);
+                      setCurrentStepIndex(0);
+                    } catch (error) {
+                      console.error('Cache clear failed:', error);
+                    }
+                  };
+
+                  return (
+                    <Card className="p-6 mb-8">
                       <div className="text-center">
-                          <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
-                          <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
+                        <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
+                        <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
+                        {currentDeployment?.statusReason && (
+                          <p className="text-on-surface-variant mb-4">{currentDeployment.statusReason}</p>
+                        )}
+                        {needsReauthorization ? (
+                          <>
+                            <p className="text-on-surface-variant mb-4">
+                              This appears to be a GitHub permissions issue. If re-authorizing doesn't work due to cached permissions, click the button below to clear the cache first.
+                            </p>
+                            <div className="flex flex-col sm:flex-row gap-3 justify-center mb-4">
+                              <Button
+                                variant="filled"
+                                onClick={handleReauthorize}
+                                icon={<Icons.GitHub size={16} />}
+                              >
+                                Re-authorize with GitHub
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                onClick={handleClearCacheAndReauth}
+                                icon={<Icons.Wrench size={16} />}
+                              >
+                                Clear Cache & Re-authorize
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
                           <p className="text-on-surface-variant mb-4">The deployment encountered an error. Please check the details below and try again.</p>
-                          <div className="text-left bg-error-container/20 p-4 rounded-lg">
-                              <p className="text-sm text-error font-medium mb-2">Common causes:</p>
-                              <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
-                                  <li><strong>Automatic setup failed:</strong> DevYntra tried to configure secrets automatically but encountered an issue</li>
-                                  <li><strong>Repository permissions:</strong> Ensure DevYntra has admin access to your repository</li>
-                                  <li><strong>Build errors:</strong> TypeScript errors, missing dependencies, or lockfile issues</li>
-                                  <li><strong>GitHub API limits:</strong> Check if you've hit GitHub API rate limits</li>
-                              </ul>
-                          </div>
+                        )}
+                        <div className="text-left bg-error-container/20 p-4 rounded-lg">
+                          <p className="text-sm text-error font-medium mb-2">Common causes:</p>
+                          <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
+                            <li><strong>Automatic setup failed:</strong> DevYntra tried to configure secrets automatically but encountered an issue</li>
+                            <li><strong>Repository permissions:</strong> Ensure DevYntra has admin access to your repository</li>
+                            <li><strong>Build errors:</strong> TypeScript errors, missing dependencies, or lockfile issues</li>
+                            <li><strong>GitHub API limits:</strong> Check if you've hit GitHub API rate limits</li>
+                          </ul>
+                        </div>
                       </div>
-                  </Card>
-                )}
+                    </Card>
+                  );
+                })()}
 
                 <Card>
                     <div className="p-4 border-b border-outline/30">
@@ -391,6 +485,23 @@ const NewDeploymentPage: React.FC = () => {
                         ))}
                     </div>
                 </Card>
+
+                {/* Real-time Terminal Window */}
+                {deploymentId && (
+                  <Card>
+                    <div className="p-4 border-b border-outline/30">
+                      <h2 className="text-lg font-medium text-on-surface">Deployment Terminal</h2>
+                      <p className="text-sm text-on-surface-variant">Live deployment logs and progress updates</p>
+                    </div>
+                    <div className="p-4">
+                      <Terminal 
+                        logs={terminalLogs} 
+                        isActive={isDeploying} 
+                        className="w-full"
+                      />
+                    </div>
+                  </Card>
+                )}
               </div>
             )}
           </div>

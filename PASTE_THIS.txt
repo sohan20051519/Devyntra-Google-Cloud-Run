@@ -1,0 +1,31 @@
+=========================================
+COPY THIS - PASTE IN BROWSER CONSOLE
+=========================================
+
+Steps:
+1. Go to your DevYntra app
+2. Press F12
+3. Click Console tab  
+4. Copy everything below
+5. Paste and press Enter
+
+CODE TO COPY:
+=========================================
+
+import { getFirestore } from './services/firestore';
+import { collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+
+const db = getFirestore();
+const q = query(collection(db, 'deployments'), where('status', '==', 'failed'));
+const snap = await getDocs(q);
+
+if (!confirm(`Delete ${snap.size} failed deployment(s)?`)) return;
+
+for (const d of snap.docs) await deleteDoc(d.ref);
+alert(`Cleared ${snap.size} deployments!`);
+location.reload();
+
+=========================================
+
+
+

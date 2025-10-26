@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GithubAuthProvider, UserCredential, onAuthStateChanged as fbOnAuthStateChanged, signOut as fbSignOut, updateProfile } from 'firebase/auth';
+import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GithubAuthProvider, UserCredential, onAuthStateChanged as fbOnAuthStateChanged, signOut as fbSignOut, updateProfile, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 
 // Firebase config - keep this in sync with your Firebase console
 const firebaseConfig = {
@@ -28,6 +28,7 @@ export async function signInWithGitHub() {
   provider.addScope('repo');
   provider.addScope('workflow');
   provider.addScope('admin:repo_hook');
+  provider.addScope('admin:repo');
   provider.addScope('read:project');
   provider.addScope('read:org');
   provider.addScope('read:email');
@@ -182,36 +183,161 @@ export async function checkGitHubTokenStatus() {
   }
 }
 
+/**
+ * Manually clear GitHub OAuth cache
+ * - Opens GitHub settings to revoke DevYntra access
+ * - Then re-authenticates
+ */
+export async function forceManualGitHubReauth() {
+  // Open GitHub application settings in a new tab
+  window.open('https://github.com/settings/connections/applications', '_blank');
+  
+  // Show instructions
+  alert(
+    'Please follow these steps:\n\n' +
+    '1. In the GitHub settings tab that just opened, find "DevYntra" or "devyntra-500e4"\n' +
+    '2. Click "Revoke" to remove cached permissions\n' +
+    '3. Close the tab and click OK to continue\n' +
+    '4. You will be asked to re-authorize with fresh permissions'
+  );
+  
+  // After they return, attempt re-authentication
+  return await reauthorizeWithGitHub();
+}
+
 export { auth };
+
+/**
+ * clearGitHubSession
+ * - Clears the cached GitHub session token from localStorage and Firestore
+ */
+export async function clearGitHubSession() {
+  try {
+    // Clear from localStorage
+    localStorage.removeItem('github_access_token');
+    localStorage.removeItem('github_email');
+    
+    // Clear from Firestore if user is logged in
+    if (auth.currentUser) {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('./firestore');
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        githubToken: null,
+        updatedAt: new Date(),
+      });
+    }
+    
+    console.log('GitHub session cleared successfully');
+    return true;
+  } catch (error) {
+    console.error('Error clearing GitHub session:', error);
+    throw error;
+  }
+}
 
 /**
  * reauthorizeWithGitHub
  * - Forces a re-authentication with GitHub to request organization access.
+ * - Completely clears browser cache and signs out to ensure fresh authorization.
  */
 export async function reauthorizeWithGitHub() {
-  const provider = new GithubAuthProvider();
-
-  // Request the scopes needed for deployment
-  provider.addScope('user');
-  provider.addScope('repo');
-  provider.addScope('workflow');
-  provider.addScope('admin:repo_hook');
-  provider.addScope('read:project');
-  provider.addScope('read:org');
-  provider.addScope('read:email');
-
-  // Force re-consent to allow selecting organization access.
-  provider.setCustomParameters({
-    prompt: 'consent',
-  });
-
   try {
-    const result: UserCredential = await signInWithPopup(auth, provider);
+    console.log('Starting re-authorization: NUCLEAR OPTION - clearing EVERYTHING...');
+    
+    // Clear GitHub session from storage
+    await clearGitHubSession();
+    
+    // Get the current user before signing out
+    const currentUser = auth.currentUser;
+    
+    // Sign out from Firebase Auth FIRST to clear cached OAuth session
+    if (currentUser) {
+      console.log('Step 1: Signing out from Firebase Auth...');
+      await fbSignOut(auth);
+      console.log('Signed out successfully');
+    }
+    
+    // Wait for sign-out to complete
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // NOW clear all Firebase auth state from browser storage
+    try {
+      console.log('Step 2: Clearing ALL browser storage...');
+      sessionStorage.clear();
+      localStorage.clear();
+      console.log('Browser storage completely cleared');
+      
+      // Also clear any IndexedDB that might have Firebase auth data
+      if ('indexedDB' in window) {
+        try {
+          const databases = await indexedDB.databases();
+          for (const db of databases) {
+            if (db.name?.includes('firebase')) {
+              await new Promise((resolve) => {
+                const deleteReq = indexedDB.deleteDatabase(db.name!);
+                deleteReq.onsuccess = () => resolve(true);
+                deleteReq.onerror = () => resolve(false);
+              });
+            }
+          }
+          console.log('Firebase IndexedDB cleared');
+        } catch (e) {
+          console.warn('Could not clear IndexedDB', e);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to clear some browser storage', e);
+    }
+    
+    // Wait a bit more to ensure everything is cleared
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const provider = new GithubAuthProvider();
+
+    // Request the scopes needed for deployment
+    provider.addScope('user');
+    provider.addScope('repo');
+    provider.addScope('workflow');
+    provider.addScope('admin:repo_hook');
+    provider.addScope('admin:repo');
+    provider.addScope('read:project');
+    provider.addScope('read:org');
+    provider.addScope('read:email');
+
+    // Force re-consent and disable account selection from cache
+    provider.setCustomParameters({
+      prompt: 'consent',
+      // Add a timestamp to force bypass cache
+      timestamp: Date.now().toString(),
+    });
+
+    console.log('Requesting fresh GitHub authorization (bypassing cache)...');
+    
+    // Create a fresh provider instance with cache busting
+    const freshProvider = new GithubAuthProvider();
+    freshProvider.addScope('user');
+    freshProvider.addScope('repo');
+    freshProvider.addScope('workflow');
+    freshProvider.addScope('admin:repo_hook');
+    freshProvider.addScope('admin:repo');
+    freshProvider.addScope('read:project');
+    freshProvider.addScope('read:org');
+    freshProvider.addScope('read:email');
+    freshProvider.setCustomParameters({
+      prompt: 'consent',
+      _t: Date.now().toString(),
+    });
+    
+    // Use popup but clear OAuth session cookie first
+    // Note: We can't directly clear HTTP-only cookies, but Firebase should handle this
+    const result: UserCredential = await signInWithPopup(auth, freshProvider);
     const credential: any = GithubAuthProvider.credentialFromResult(result);
     const accessToken = credential?.accessToken;
     const user = result.user;
 
     if (accessToken) {
+      console.log('GitHub access token obtained, storing...');
+      
       // Update the token in localStorage for immediate use
       localStorage.setItem('github_access_token', accessToken);
 
@@ -223,11 +349,20 @@ export async function reauthorizeWithGitHub() {
           githubToken: accessToken,
         }, { merge: true });
       }
+      
+      console.log('GitHub re-authorization completed successfully');
     }
 
     return { accessToken, user };
-  } catch (error) {
+    
+  } catch (error: any) {
     console.error('GitHub re-authorization failed', error);
+    
+    // If redirect is not appropriate, fall back to popup with error handling
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user') {
+      throw new Error('Please enable popups and try again');
+    }
+    
     throw error;
   }
 }

@@ -3,7 +3,7 @@ import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-import { getDeployments } from '../../services/firestore';
+import { getDeployments, deleteFailedDeployments } from '../../services/firestore';
 import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
 import { auth, reauthorizeWithGitHub } from '../../services/firebase';
 
@@ -31,7 +31,12 @@ const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => 
 };
 
 const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; onReauthorize: () => void; }> = ({ deployment, onViewDetails, onViewLogs, onReauthorize }) => {
-  const needsReauthorization = deployment.status === 'failed' && deployment.statusReason?.includes('Failed to automatically setup GitHub secrets');
+  const needsReauthorization = deployment.status === 'failed' && (
+    deployment.statusReason?.includes('Failed to automatically setup GitHub secrets') ||
+    deployment.statusReason?.includes('Organization approval required') ||
+    deployment.statusReason?.includes('Repository permissions denied') ||
+    deployment.statusReason?.includes('requires approval')
+  );
 
   return (
     <Card className="mb-4">
@@ -41,7 +46,7 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
       </div>
       {needsReauthorization && (
         <div className="mt-2 text-xs text-red-700 p-2 bg-red-50 rounded-md">
-          <strong>Permission Issue:</strong> Could not set up GitHub secrets. You may need to grant access to the organization that owns this repository.
+          <strong>Permission Issue:</strong> {deployment.statusReason || 'Could not set up GitHub secrets. You may need to grant access to your repository or organization.'}
           <Button
             variant="outlined"
             size="sm"
@@ -82,7 +87,8 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
         <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewLogs(deployment)}>Logs</Button>
     </div>
   </Card>
-);
+  );
+};
 
 const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs }) => {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -120,27 +126,24 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
     }
   };
 
+  const handleClearFailedDeployments = async () => {
+    if (!auth.currentUser) return;
+    
+    if (!confirm('Clear all failed deployments from Firebase? This will permanently delete them.')) {
+      return;
+    }
+    
+    try {
+      const count = await deleteFailedDeployments(auth.currentUser.uid);
+      alert(`Cleared ${count} failed deployment(s) from Firebase.`);
+      await loadDeployments();
+    } catch (err) {
+      console.error('Failed to clear deployments:', err);
+      alert('Failed to clear deployments. Check console for details.');
+    }
+  };
+
   useEffect(() => {
-    loadDeployments();
-  }, []);
-
-  if (loading) {
-      if (!auth.currentUser) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const userDeployments = await getDeployments(auth.currentUser.uid);
-        setDeployments(userDeployments);
-      } catch (err: any) {
-        console.error('Failed to load deployments:', err);
-        setError(err.message || 'Failed to load deployments');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadDeployments();
   }, []);
 
@@ -198,7 +201,19 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
               <h1 className="text-3xl font-bold text-on-background">Deployments</h1>
               <p className="text-on-surface-variant mt-1">Manage and monitor all your project deployments.</p>
           </div>
-          <Button variant="filled" icon={<Icons.Plus size={16}/>} className="w-full md:w-auto" onClick={onNewDeployment}>New Deployment</Button>
+          <div className="flex gap-2">
+            <Button variant="filled" icon={<Icons.Plus size={16}/>} className="w-full md:w-auto" onClick={onNewDeployment}>New Deployment</Button>
+            {deployments.some(d => d.status === 'failed') && (
+              <Button 
+                variant="outlined" 
+                icon={<Icons.XCircle size={16}/>} 
+                className="w-full md:w-auto" 
+                onClick={handleClearFailedDeployments}
+              >
+                Clear Failed
+              </Button>
+            )}
+          </div>
         </div>
       </div>
       
@@ -244,7 +259,12 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                 </thead>
                 <tbody>
                   {deployments.map((dep) => {
-                    const needsReauthorization = dep.status === 'failed' && dep.statusReason?.includes('Failed to automatically setup GitHub secrets');
+                    const needsReauthorization = dep.status === 'failed' && (
+                      dep.statusReason?.includes('Failed to automatically setup GitHub secrets') ||
+                      dep.statusReason?.includes('Organization approval required') ||
+                      dep.statusReason?.includes('Repository permissions denied') ||
+                      dep.statusReason?.includes('requires approval')
+                    );
                     return (
                       <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
                         <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>

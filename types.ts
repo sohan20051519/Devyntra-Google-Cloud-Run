@@ -13,10 +13,11 @@ export interface Deployment {
   repoOwner: string;
   repoName: string;
   repoId: string;
-  status: 'detecting_language' | 'analyzing' | 'fixing' | 'deploying' | 'deployed' | 'failed';
+  status: 'starting' | 'injecting_secrets' | 'detecting_language' | 'analyzing' | 'fixing' | 'deploying' | 'deployed' | 'failed';
   language?: string;
   framework?: string;
   message: string;
+  statusReason?: string;
   julesSessionId?: string;
   julesSessionUrl?: string;
   prNumber?: number;

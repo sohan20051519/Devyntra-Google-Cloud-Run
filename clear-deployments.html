@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Failed Deployments</title>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+        }
+        .success {
+            background: #e8f5e9;
+            border-left-color: #4CAF50;
+        }
+        .error {
+            background: #ffebee;
+            border-left-color: #f44336;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .danger {
+            background: #f44336;
+        }
+        .danger:hover {
+            background: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Clear Failed Deployments</h1>
+        <p>This will delete all failed deployments from your Firebase database.</p>
+        
+        <div id="status"></div>
+        
+        <div>
+            <button id="clearBtn" onclick="clearFailedDeployments()">Clear Failed Deployments</button>
+            <button class="danger" onclick="clearAllDeployments()">Clear ALL Deployments</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDYfGFH5-tMEGVoPsTqBgHYX4qcZbY8WkE",
+            authDomain: "devyntra-500e4.firebaseapp.com",
+            projectId: "devyntra-500e4",
+            storageBucket: "devyntra-500e4.firebasestorage.app",
+            messagingSenderId: "583516794481",
+            appId: "1:583516794481:web:ffd1dcc966bb04f27275d0",
+            measurementId: "G-SWF3LQFBR0"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+
+        function clearFailedDeployments() {
+            showStatus('Connecting to Firebase...');
+            document.getElementById('clearBtn').disabled = true;
+            
+            // Check if user is authenticated
+            const user = firebase.auth().currentUser;
+            
+            if (!user) {
+                showStatus('Please sign in to Firebase first. Click "Sign In" below.', 'error');
+                document.getElementById('clearBtn').disabled = false;
+                
+                // Try to sign in with popup
+                const provider = new firebase.auth.GoogleAuthProvider();
+                firebase.auth().signInWithPopup(provider)
+                    .then(() => {
+                        showStatus('Signed in! Click "Clear Failed Deployments" again.', 'success');
+                    })
+                    .catch(err => {
+                        showStatus('Sign in failed. Please try the browser console method instead.', 'error');
+                        console.error(err);
+                    });
+                return;
+            }
+            
+            db.collection('deployments')
+                .where('status', '==', 'failed')
+                .get()
+                .then((snapshot) => {
+                    if (snapshot.empty) {
+                        showStatus('No failed deployments found.', 'success');
+                        document.getElementById('clearBtn').disabled = false;
+                        return;
+                    }
+
+                    showStatus(`Found ${snapshot.size} failed deployments. Deleting...`, 'info');
+                    
+                    const batch = db.batch();
+                    snapshot.docs.forEach(doc => {
+                        batch.delete(doc.ref);
+                    });
+
+                    return batch.commit();
+                })
+                .then(() => {
+                    showStatus('Successfully cleared all failed deployments!', 'success');
+                    document.getElementById('clearBtn').disabled = false;
+                })
+                .catch((error) => {
+                    showStatus('Error: ' + error.message, 'error');
+                    document.getElementById('clearBtn').disabled = false;
+                    console.error('Error:', error);
+                });
+        }
+
+        function clearAllDeployments() {
+            if (!confirm('Are you sure you want to delete ALL deployments? This cannot be undone.')) {
+                return;
+            }
+            
+            showStatus('Connecting to Firebase...');
+            document.getElementById('clearBtn').disabled = true;
+            
+            db.collection('deployments')
+                .get()
+                .then((snapshot) => {
+                    if (snapshot.empty) {
+                        showStatus('No deployments found.', 'success');
+                        document.getElementById('clearBtn').disabled = false;
+                        return;
+                    }
+
+                    showStatus(`Found ${snapshot.size} deployments. Deleting...`, 'error');
+                    
+                    const batch = db.batch();
+                    snapshot.docs.forEach(doc => {
+                        batch.delete(doc.ref);
+                    });
+
+                    return batch.commit();
+                })
+                .then(() => {
+                    showStatus('Successfully cleared all deployments!', 'success');
+                    document.getElementById('clearBtn').disabled = false;
+                })
+                .catch((error) => {
+                    showStatus('Error: ' + error.message, 'error');
+                    document.getElementById('clearBtn').disabled = false;
+                    console.error('Error:', error);
+                });
+        }
+
+        // Check connection on load
+        showStatus('Ready to clear deployments. Click a button to start.', 'info');
+    </script>
+</body>
+</html>
+

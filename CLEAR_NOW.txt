@@ -1,0 +1,46 @@
+===============================================
+QUICK CLEAR FAILED DEPLOYMENTS - COPY & PASTE
+===============================================
+
+INSTRUCTIONS:
+1. Open your DevYntra app in browser
+2. Press F12 to open DevTools
+3. Go to Console tab
+4. Copy and paste the code below
+5. Press Enter
+
+===============================================
+
+CODE TO PASTE IN BROWSER CONSOLE:
+
+(async () => {
+  const { getFirestore, collection, query, where, getDocs, deleteDoc } = 
+    await import('./services/firestore.ts');
+  const { db } = await import('./services/firestore.ts');
+  
+  const deploymentsRef = collection(db, 'deployments');
+  const q = query(deploymentsRef, where('status', '==', 'failed'));
+  const snapshot = await getDocs(q);
+  
+  if (snapshot.empty) {
+    alert('No failed deployments found.');
+    return;
+  }
+  
+  const count = snapshot.size;
+  if (!confirm(`Delete ${count} failed deployment(s)?`)) return;
+  
+  for (const docSnap of snapshot.docs) {
+    await deleteDoc(docSnap.ref);
+  }
+  
+  alert(`Deleted ${count} failed deployment(s)!`);
+  location.reload();
+})();
+
+===============================================
+ALTERNATIVE: Open clear-deployments.html in your browser
+===============================================
+
+
+
