@@ -1,0 +1,26 @@
+{
+  "name": "devyntra-secrets-injection",
+  "version": "1.0.0",
+  "description": "Automatically inject GitHub secrets for DevYntra deployment",
+  "main": "inject-secrets-cli.js",
+  "bin": {
+    "inject-secrets": "./inject-secrets-cli.js"
+  },
+  "scripts": {
+    "start": "node inject-secrets-cli.js",
+    "inject": "node inject-secrets-cli.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.2",
+    "tweetnacl": "^1.0.3"
+  },
+  "keywords": [
+    "github",
+    "secrets",
+    "deployment",
+    "automation",
+    "devyntra"
+  ],
+  "author": "DevYntra",
+  "license": "MIT"
+}
