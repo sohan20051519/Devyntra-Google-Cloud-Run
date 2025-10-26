@@ -334,6 +334,20 @@ const NewDeploymentPage: React.FC = () => {
                           <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
                           <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
                           <p className="text-on-surface-variant mb-4">The deployment encountered an error. Please check the details below and try again.</p>
+
+                          {(() => {
+                            const errorStep = deploymentSteps.find(step => step.status === 'error');
+                            if (errorStep) {
+                              return (
+                                <div className="text-left bg-error-container/20 p-4 rounded-lg mb-4">
+                                  <p className="text-sm text-error font-medium mb-2">Error Details:</p>
+                                  <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{errorStep.details}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+
                           <div className="text-left bg-error-container/20 p-4 rounded-lg">
                               <p className="text-sm text-error font-medium mb-2">Common causes:</p>
                               <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
