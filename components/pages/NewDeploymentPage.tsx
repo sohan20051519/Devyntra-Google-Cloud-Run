@@ -329,36 +329,51 @@ const NewDeploymentPage: React.FC = () => {
 
                 {/* Show failure message if deployment failed */}
                 {deploymentId && !isDeploying && !deployedUrl && deploymentSteps.some(step => step.status === 'error') && (
-                  <Card className="p-6 mb-8">
-                      <div className="text-center">
-                          <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
-                          <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
-                          <p className="text-on-surface-variant mb-4">The deployment encountered an error. Please check the details below and try again.</p>
+                  (() => {
+                    const errorStep = deploymentSteps.find(step => step.status === 'error');
+                    const isPermissionError = errorStep?.details.includes('Failed to automatically setup GitHub secrets');
 
-                          {(() => {
-                            const errorStep = deploymentSteps.find(step => step.status === 'error');
-                            if (errorStep) {
-                              return (
-                                <div className="text-left bg-error-container/20 p-4 rounded-lg mb-4">
+                    const repoUrl = repos?.find(repo => repo.id === selectedRepo)?.url;
+                    const settingsUrl = repoUrl ? `${repoUrl.replace('github.com', 'github.com')}/settings/access` : '#';
+
+                    return (
+                      <Card className="p-6 mb-8">
+                        <div className="text-center">
+                            <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
+                            <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
+                            <p className="text-on-surface-variant mb-4">
+                              {isPermissionError
+                                ? 'The deployment failed due to a repository permission issue.'
+                                : 'The deployment encountered an error. Please check the details below and try again.'
+                              }
+                            </p>
+
+                            {isPermissionError ? (
+                              <div className="text-left bg-error-container/20 p-4 rounded-lg">
+                                <p className="text-sm text-error font-medium mb-2">Action Required: Grant Admin Permissions</p>
+                                <p className="text-sm text-on-surface-variant mb-3">
+                                  To fix this, the GitHub account connected to DevYntra must have the <strong>Admin</strong> role for the selected repository.
+                                  This is required to securely set up secrets and webhooks for the CI/CD pipeline.
+                                </p>
+                                <a
+                                  href={settingsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-block bg-primary text-on-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90"
+                                >
+                                  Go to Repository Settings
+                                </a>
+                              </div>
+                            ) : (
+                              <div className="text-left bg-error-container/20 p-4 rounded-lg">
                                   <p className="text-sm text-error font-medium mb-2">Error Details:</p>
-                                  <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{errorStep.details}</p>
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-
-                          <div className="text-left bg-error-container/20 p-4 rounded-lg">
-                              <p className="text-sm text-error font-medium mb-2">Common causes:</p>
-                              <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
-                                  <li><strong>Automatic setup failed:</strong> DevYntra tried to configure secrets automatically but encountered an issue</li>
-                                  <li><strong>Repository permissions:</strong> Ensure DevYntra has admin access to your repository</li>
-                                  <li><strong>Build errors:</strong> TypeScript errors, missing dependencies, or lockfile issues</li>
-                                  <li><strong>GitHub API limits:</strong> Check if you've hit GitHub API rate limits</li>
-                              </ul>
-                          </div>
-                      </div>
-                  </Card>
+                                  <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{errorStep?.details ?? 'Unknown error'}</p>
+                              </div>
+                            )}
+                        </div>
+                      </Card>
+                    );
+                  })()
                 )}
 
                 <Card>
