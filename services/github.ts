@@ -30,3 +30,30 @@ export async function fetchUserRepos(): Promise<Repository[]> {
 
   return repos;
 }
+
+export async function checkRepoPermission(owner: string, repo: string): Promise<{ isAdmin: boolean }> {
+  const token = localStorage.getItem('github_access_token');
+  if (!token) {
+    throw new Error('No GitHub access token found.');
+  }
+
+  const headers = new Headers({
+    'Authorization': `token ${token}`,
+    'Accept': 'application/vnd.github+json'
+  });
+
+  const url = `https://api.github.com/repos/${owner}/${repo}`;
+  const resp = await fetch(url, { headers });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    console.error(`GitHub API error checking permissions for ${owner}/${repo}: ${resp.status} ${resp.statusText} - ${text}`);
+    // Default to false if we can't fetch for any reason (e.g., private repo, deleted, etc.)
+    return { isAdmin: false };
+  }
+
+  const data = await resp.json();
+  const isAdmin = data.permissions?.admin === true;
+
+  return { isAdmin };
+}

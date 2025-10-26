@@ -3,7 +3,7 @@ import { Repository } from '../../types';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
-import { fetchUserRepos } from '../../services/github';
+import { fetchUserRepos, checkRepoPermission } from '../../services/github';
 import { startDeployment, watchDeployment } from '../../services/firestore';
 import { checkGitHubTokenStatus, signInWithGitHub } from '../../services/firebase';
 
@@ -72,6 +72,8 @@ const NewDeploymentPage: React.FC = () => {
   const [showInstructions, setShowInstructions] = useState<boolean>(true);
   const [deploymentId, setDeploymentId] = useState<string | null>(null);
   const [githubTokenStatus, setGithubTokenStatus] = useState<{ hasUser: boolean; hasToken: boolean } | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isCheckingAdmin, setIsCheckingAdmin] = useState<boolean>(false);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -228,6 +230,27 @@ const NewDeploymentPage: React.FC = () => {
     checkTokenStatus();
   }, [checkTokenStatus]);
 
+  // Check for admin permissions when selected repo changes
+  useEffect(() => {
+    if (selectedRepo && repos) {
+      const repoData = repos.find(r => r.id === selectedRepo);
+      if (repoData) {
+        setIsCheckingAdmin(true);
+        checkRepoPermission(repoData.owner, repoData.name)
+          .then(({ isAdmin }) => {
+            setIsAdmin(isAdmin);
+          })
+          .catch(err => {
+            console.error('Error checking repo permission', err);
+            setIsAdmin(false); // Default to false on error
+          })
+          .finally(() => {
+            setIsCheckingAdmin(false);
+          });
+      }
+    }
+  }, [selectedRepo, repos]);
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -293,9 +316,18 @@ const NewDeploymentPage: React.FC = () => {
                   ) : (
                     <div className="p-4 text-center">No repositories found. Connect a GitHub account or check permissions.</div>
                   )}
-                  <Button onClick={runDeployment} className="w-full mt-6">
-                    Deploy Now
+                  <Button onClick={runDeployment} className="w-full mt-6" disabled={!isAdmin || isCheckingAdmin}>
+                    {isCheckingAdmin ? 'Checking permissions...' : 'Deploy Now'}
                   </Button>
+
+                  {!isCheckingAdmin && !isAdmin && repos && repos.length > 0 && (
+                    <div className="mt-4 p-3 rounded-lg bg-error-container/20 text-on-error-container text-sm">
+                      <p className="font-medium">Admin Permissions Required</p>
+                      <p>
+                        You need admin access to this repository to deploy it. Please ask a repository owner to grant you admin permissions.
+                      </p>
+                    </div>
+                  )}
                 </Card>
                 <div
                   className={`mt-4 text-center text-sm text-on-surface-variant transition-opacity duration-500 ${
@@ -329,51 +361,22 @@ const NewDeploymentPage: React.FC = () => {
 
                 {/* Show failure message if deployment failed */}
                 {deploymentId && !isDeploying && !deployedUrl && deploymentSteps.some(step => step.status === 'error') && (
-                  (() => {
-                    const errorStep = deploymentSteps.find(step => step.status === 'error');
-                    const isPermissionError = errorStep?.details.includes('Failed to automatically setup GitHub secrets');
-
-                    const repoUrl = repos?.find(repo => repo.id === selectedRepo)?.url;
-                    const settingsUrl = repoUrl ? `${repoUrl.replace('github.com', 'github.com')}/settings/access` : '#';
-
-                    return (
-                      <Card className="p-6 mb-8">
-                        <div className="text-center">
-                            <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
-                            <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
-                            <p className="text-on-surface-variant mb-4">
-                              {isPermissionError
-                                ? 'The deployment failed due to a repository permission issue.'
-                                : 'The deployment encountered an error. Please check the details below and try again.'
-                              }
-                            </p>
-
-                            {isPermissionError ? (
-                              <div className="text-left bg-error-container/20 p-4 rounded-lg">
-                                <p className="text-sm text-error font-medium mb-2">Action Required: Grant Admin Permissions</p>
-                                <p className="text-sm text-on-surface-variant mb-3">
-                                  To fix this, the GitHub account connected to DevYntra must have the <strong>Admin</strong> role for the selected repository.
-                                  This is required to securely set up secrets and webhooks for the CI/CD pipeline.
-                                </p>
-                                <a
-                                  href={settingsUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-block bg-primary text-on-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90"
-                                >
-                                  Go to Repository Settings
-                                </a>
-                              </div>
-                            ) : (
-                              <div className="text-left bg-error-container/20 p-4 rounded-lg">
-                                  <p className="text-sm text-error font-medium mb-2">Error Details:</p>
-                                  <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{errorStep?.details ?? 'Unknown error'}</p>
-                              </div>
-                            )}
-                        </div>
-                      </Card>
-                    );
-                  })()
+                  <Card className="p-6 mb-8">
+                      <div className="text-center">
+                          <Icons.XCircle size={48} className="text-error mx-auto mb-4" />
+                          <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Failed</h2>
+                          <p className="text-on-surface-variant mb-4">The deployment encountered an error. Please check the details below and try again.</p>
+                          <div className="text-left bg-error-container/20 p-4 rounded-lg">
+                              <p className="text-sm text-error font-medium mb-2">Common causes:</p>
+                              <ul className="text-sm text-on-surface-variant list-disc list-inside space-y-1">
+                                  <li><strong>Automatic setup failed:</strong> DevYntra tried to configure secrets automatically but encountered an issue</li>
+                                  <li><strong>Repository permissions:</strong> Ensure DevYntra has admin access to your repository</li>
+                                  <li><strong>Build errors:</strong> TypeScript errors, missing dependencies, or lockfile issues</li>
+                                  <li><strong>GitHub API limits:</strong> Check if you've hit GitHub API rate limits</li>
+                              </ul>
+                          </div>
+                      </div>
+                  </Card>
                 )}
 
                 <Card>
