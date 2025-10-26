@@ -169,6 +169,16 @@ const NewDeploymentPage: React.FC = () => {
       let newCurrentStepIndex = currentStepIndex;
 
       switch (deployment.status) {
+        case 'starting':
+          newSteps = initialSteps.map((s, i) => i === 0 ? { ...s, status: 'pending', details: deployment.message } : { ...s, status: 'pending', details: s.details });
+          newCurrentStepIndex = 0;
+          addTerminalLog('🚀 Deployment initiated', 'info');
+          break;
+        case 'injecting_secrets':
+          newSteps[0] = { ...newSteps[0], status: 'in-progress', details: deployment.message };
+          newCurrentStepIndex = 0;
+          addTerminalLog('🔐 Injecting required GitHub secrets...', 'info');
+          break;
         case 'detecting_language':
           newSteps[0] = { ...newSteps[0], status: 'in-progress', details: deployment.message };
           newCurrentStepIndex = 0;

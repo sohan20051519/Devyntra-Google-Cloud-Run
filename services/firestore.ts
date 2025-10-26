@@ -77,8 +77,8 @@ export const startDeployment = async (repoId: string, repoOwner: string, repoNam
       return userData.githubToken;
     };
     
-    // Call the Cloud Function via HTTP
-    const response = await fetch('https://us-central1-devyntra-500e4.cloudfunctions.net/deploy', {
+    // Call the Cloud Function via HTTP (2nd gen URL)
+    const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
