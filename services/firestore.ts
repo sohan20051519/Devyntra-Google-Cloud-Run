@@ -134,34 +134,86 @@ export const getDeployments = async (userId: string): Promise<Deployment[]> => {
 
 // Get deployment statistics
 export const getDeploymentStats = async (userId: string) => {
-  const deploymentsRef = collection(db, 'deployments');
-  const q = query(deploymentsRef, where('userId', '==', userId));
-  
-  const snapshot = await getDocs(q);
-  const deployments = snapshot.docs.map(doc => doc.data());
-  
-  const stats = {
-    total: deployments.length,
-    deployed: deployments.filter(d => d.status === 'deployed').length,
-    failed: deployments.filter(d => d.status === 'failed').length,
-    inProgress: deployments.filter(d => ['detecting_language', 'analyzing', 'fixing', 'deploying'].includes(d.status)).length,
-  };
-  
-  return stats;
+  try {
+    const deploymentsRef = collection(db, 'deployments');
+    const q = query(deploymentsRef, where('userId', '==', userId));
+    
+    const snapshot = await getDocs(q);
+    const deployments = snapshot.docs.map(doc => doc.data());
+    
+    const stats = {
+      total: deployments.length,
+      deployed: deployments.filter(d => d.status === 'deployed').length,
+      failed: deployments.filter(d => d.status === 'failed').length,
+      inProgress: deployments.filter(d => ['detecting_language', 'analyzing', 'fixing', 'deploying'].includes(d.status)).length,
+    };
+    
+    return stats;
+  } catch (error) {
+    console.error('Error getting deployment stats:', error);
+    // Return zero stats if query fails (e.g., missing index)
+    return { total: 0, deployed: 0, failed: 0, inProgress: 0 };
+  }
 };
 
 // Get recent activity
 export const getRecentActivity = async (userId: string, limitCount: number = 10) => {
-  const deploymentsRef = collection(db, 'deployments');
-  const q = query(
-    deploymentsRef,
-    where('userId', '==', userId),
-    orderBy('updatedAt', 'desc'),
-    limit(limitCount)
-  );
-  
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Deployment));
+  try {
+    const deploymentsRef = collection(db, 'deployments');
+    // Simplified query - remove orderBy to avoid index requirement
+    const q = query(
+      deploymentsRef,
+      where('userId', '==', userId),
+      limit(limitCount)
+    );
+    
+    const snapshot = await getDocs(q);
+    const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Deployment));
+    // Sort client-side by updatedAt
+    return docs.sort((a, b) => {
+      const aTime = a.updatedAt?.toDate?.()?.getTime() || 0;
+      const bTime = b.updatedAt?.toDate?.()?.getTime() || 0;
+      return bTime - aTime;
+    });
+  } catch (error) {
+    console.error('Error getting recent activity:', error);
+    return [];
+  }
 };
 
+// Delete a specific deployment
+export const deleteDeployment = async (deploymentId: string) => {
+  const { doc, deleteDoc } = await import('firebase/firestore');
+  try {
+    const deploymentRef = doc(db, 'deployments', deploymentId);
+    await deleteDoc(deploymentRef);
+    console.log('Deployment deleted:', deploymentId);
+    return true;
+  } catch (error) {
+    console.error('Error deleting deployment:', error);
+    throw error;
+  }
+};
+
+// Delete all failed deployments for a user
+export const deleteFailedDeployments = async (userId: string) => {
+  const { doc, deleteDoc } = await import('firebase/firestore');
+  try {
+    const deploymentsRef = collection(db, 'deployments');
+    const q = query(
+      deploymentsRef,
+      where('userId', '==', userId),
+      where('status', '==', 'failed')
+    );
+    
+    const snapshot = await getDocs(q);
+    const deletePromises = snapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+    console.log(`Deleted ${deletePromises.length} failed deployments`);
+    return deletePromises.length;
+  } catch (error) {
+    console.error('Error deleting failed deployments:', error);
+    throw error;
+  }
+};
 
