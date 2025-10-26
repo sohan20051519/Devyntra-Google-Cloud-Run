@@ -122,9 +122,6 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
 
   useEffect(() => {
     loadDeployments();
-  }, []);
-
-  if (loading) {
       if (!auth.currentUser) {
         setLoading(false);
         return;
