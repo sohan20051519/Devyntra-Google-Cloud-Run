@@ -32,8 +32,11 @@ export async function signInWithGitHub() {
   provider.addScope('read:org');
   provider.addScope('read:email');
 
-  // Optionally force re-consent to allow selecting organization access, etc.
-  provider.setCustomParameters({ allow_signup: 'true' });
+  // Force re-consent to allow selecting organization access.
+  provider.setCustomParameters({
+    allow_signup: 'true',
+    prompt: 'consent',
+  });
 
   try {
     const result: UserCredential = await signInWithPopup(auth, provider);
