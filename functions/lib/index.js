@@ -6,7 +6,6 @@ const logger = require("firebase-functions/logger");
 const rest_1 = require("@octokit/rest");
 const axios_1 = require("axios");
 const sodium = require("tweetsodium");
-const params_1 = require("firebase-functions/params");
 const admin = require("firebase-admin");
 // Initialize Admin SDK once
 try {
@@ -16,12 +15,21 @@ try {
 }
 catch { }
 const db = admin.firestore();
-// Secrets
-const SECRET_GCP_SA_KEY = (0, params_1.defineSecret)("GCP_SA_KEY");
-const SECRET_DEVYNTRA_WEBHOOK_URL = (0, params_1.defineSecret)("DEVYNTRA_WEBHOOK_URL");
-const SECRET_JULES_API_URL = (0, params_1.defineSecret)("JULES_API_URL");
-const SECRET_JULES_API_KEY = (0, params_1.defineSecret)("JULES_API_KEY");
-const SECRET_CLOUD_RUN_REGION = (0, params_1.defineSecret)("CLOUD_RUN_REGION");
+// Access Secret Manager without Firebase bindings
+async function accessSecret(projectId, name) {
+    try {
+        const token = await getAccessToken();
+        const url = `https://secretmanager.googleapis.com/v1/projects/${projectId}/secrets/${name}/versions/latest:access`;
+        const { data } = await axios_1.default.get(url, { headers: { Authorization: `Bearer ${token}` } });
+        const payload = data?.payload?.data;
+        if (!payload)
+            return null;
+        return Buffer.from(payload, 'base64').toString('utf8');
+    }
+    catch {
+        return null;
+    }
+}
 // Helpers to call Google APIs with the Function's service account
 async function getAccessToken() {
     try {
@@ -242,13 +250,54 @@ jobs:
         with:
           credentials_json: ${ghaSecret}
       - uses: 'google-github-actions/setup-gcloud@v2'
-      - name: Deploy to Cloud Run (source-based)
+      - name: Build and Deploy with Dockerfile
+        env:
+          PROJECT_ID: ${projectId}
+          REGION: ${region}
+          SERVICE: ${serviceName}
         run: |
-          gcloud config set project ${projectId}
-          gcloud run deploy ${serviceName} \
-            --region=${region} \
-            --source=. \
-            --allow-unauthenticated
+          set -e
+          gcloud config set project "$PROJECT_ID"
+          # Ensure AR docker auth is configured
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" -q
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/$SERVICE:${'${{ github.sha }}'}"
+          echo "Building $IMAGE"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          gcloud run deploy "$SERVICE" \
+            --region="$REGION" \
+            --image="$IMAGE" \
+            --allow-unauthenticated \
+            --port=8080
+`;
+}
+function defaultDockerfile() {
+    return `# Multi-stage build for Vite/React or generic Node frontends
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci || npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+# Serve on Cloud Run's 8080 port
+RUN sed -i 's/80;/8080;/' /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]
+`;
+}
+function defaultDockerignore() {
+    return `node_modules
+npm-debug.log
+Dockerfile*
+.dockerignore
+.git
+.gitignore
+dist
+build
+.DS_Store
 `;
 }
 async function triggerWorkflowDispatch(octokit, owner, repo, workflowFile, refBranch) {
@@ -402,8 +451,8 @@ exports.deploy = (0, https_1.onRequest)({
         await setStatus("injecting_secrets", "Injecting required GitHub secrets...");
         // 2) Ensure required secrets in repo
         const projectId = process.env.FIREBASE_CONFIG ? JSON.parse(process.env.FIREBASE_CONFIG).projectId : process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
-        let gcpSaKey = SECRET_GCP_SA_KEY.value() || process.env.GCP_SA_KEY;
-        const webhookUrl = SECRET_DEVYNTRA_WEBHOOK_URL.value() || process.env.DEVYNTRA_WEBHOOK_URL || "";
+        let gcpSaKey = process.env.GCP_SA_KEY || (projectId ? await accessSecret(projectId, "GCP_SA_KEY") : null) || undefined;
+        const webhookUrl = process.env.DEVYNTRA_WEBHOOK_URL || (projectId ? (await accessSecret(projectId, "DEVYNTRA_WEBHOOK_URL")) || "" : "");
         if (!projectId || !gcpSaKey) {
             logger.warn("Missing projectId or GCP_SA_KEY in env; CI/CD may fail.");
         }
@@ -417,7 +466,7 @@ exports.deploy = (0, https_1.onRequest)({
             await upsertRepoSecret(octokit, repoOwner, repoName, "FIREBASE_PROJECT_ID", projectId);
         if (gcpSaKey)
             await upsertRepoSecret(octokit, repoOwner, repoName, "GCP_SA_KEY", gcpSaKey);
-        const regionVal = SECRET_CLOUD_RUN_REGION.value() || process.env.CLOUD_RUN_REGION || "us-central1";
+        const regionVal = process.env.CLOUD_RUN_REGION || (projectId ? (await accessSecret(projectId, "CLOUD_RUN_REGION")) || "us-central1" : "us-central1");
         await upsertRepoSecret(octokit, repoOwner, repoName, "CLOUD_RUN_REGION", regionVal);
         if (webhookUrl)
             await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_URL", webhookUrl);
@@ -451,8 +500,8 @@ exports.deploy = (0, https_1.onRequest)({
         const errorsFound = analysisConclusion === "failure";
         // 4) If errors, call Jules API to fix and auto-merge
         if (errorsFound) {
-            const julesUrl = SECRET_JULES_API_URL.value() || process.env.JULES_API_URL;
-            const julesKey = SECRET_JULES_API_KEY.value() || process.env.JULES_API_KEY;
+            const julesUrl = process.env.JULES_API_URL || (projectId ? await accessSecret(projectId, "JULES_API_URL") : null);
+            const julesKey = process.env.JULES_API_KEY || (projectId ? await accessSecret(projectId, "JULES_API_KEY") : null);
             if (julesUrl && julesKey) {
                 try {
                     await setStatus("fixing", "Errors found. Sending to Jules for auto-fix...");
@@ -469,8 +518,42 @@ exports.deploy = (0, https_1.onRequest)({
                 }
             }
         }
-        // 5) Create CI/CD workflow for Cloud Run
-        const region = SECRET_CLOUD_RUN_REGION.value() || process.env.CLOUD_RUN_REGION || "us-central1";
+        // Ensure JULES secrets are also present in the repo for workflows, if available
+        const julesUrlForRepo = process.env.JULES_API_URL || (projectId ? await accessSecret(projectId, "JULES_API_URL") : null);
+        const julesKeyForRepo = process.env.JULES_API_KEY || (projectId ? await accessSecret(projectId, "JULES_API_KEY") : null);
+        if (julesUrlForRepo)
+            await upsertRepoSecret(octokit, repoOwner, repoName, "JULES_API_URL", julesUrlForRepo);
+        if (julesKeyForRepo)
+            await upsertRepoSecret(octokit, repoOwner, repoName, "JULES_API_KEY", julesKeyForRepo);
+        // 5) Ensure Dockerfile and .dockerignore present for Docker-based deploys
+        try {
+            await octokit.repos.getContent({ owner: repoOwner, repo: repoName, path: "Dockerfile", ref: defaultBranch });
+        }
+        catch {
+            await createOrUpdateFile(octokit, {
+                owner: repoOwner,
+                repo: repoName,
+                path: "Dockerfile",
+                content: defaultDockerfile(),
+                message: "chore: add Dockerfile for Cloud Run via Devyntra",
+                branch: defaultBranch,
+            });
+        }
+        try {
+            await octokit.repos.getContent({ owner: repoOwner, repo: repoName, path: ".dockerignore", ref: defaultBranch });
+        }
+        catch {
+            await createOrUpdateFile(octokit, {
+                owner: repoOwner,
+                repo: repoName,
+                path: ".dockerignore",
+                content: defaultDockerignore(),
+                message: "chore: add .dockerignore via Devyntra",
+                branch: defaultBranch,
+            });
+        }
+        // 6) Create CI/CD workflow for Cloud Run
+        const region = process.env.CLOUD_RUN_REGION || "us-central1";
         const serviceName = `${repoName}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 30) || "web-service";
         const deployPath = ".github/workflows/deploy-cloudrun.yml";
         await createOrUpdateFile(octokit, {
