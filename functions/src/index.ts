@@ -294,6 +294,10 @@ function analysisWorkflowYml(): string {
   return `name: Analyze Codebase
 on:
   workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: 'Devyntra deployment id'
+        required: false
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -302,7 +306,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: |
+      - name: Notify Devyntra - Analyze start
+        env:
+          WEBHOOK_URL: ${'${{ secrets.DEVYNTRA_WEBHOOK_URL }}'}
+          WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
+          DEPLOYMENT_ID: ${'${{ github.event.inputs.deployment_id }}'}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "deploymentId": "$DEPLOYMENT_ID",
+            "event": "progress",
+            "step": "analyze",
+            "message": "Analyze"
+          }
+          EOF
+          )
+          if [ -n "$WEBHOOK_URL" ] && [ -n "$WEBHOOK_TOKEN" ]; then
+            curl -sS -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Devyntra-Token: $WEBHOOK_TOKEN" \
+              -d "$PAYLOAD" || true
+          fi
+      - name: Run Linters and Compilers
+        id: run_analysis
+        run: |
+          set -e
           if [ -f package.json ]; then
             npm ci || npm install
             npx eslint . || true
@@ -313,6 +341,31 @@ jobs:
             pylint $(git ls-files '*.py') || true
           elif [ -f go.mod ]; then
             go vet ./... || true
+          fi
+      - name: Notify Devyntra - Analyze complete
+        if: always()
+        env:
+          WEBHOOK_URL: ${'${{ secrets.DEVYNTRA_WEBHOOK_URL }}'}
+          WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
+          DEPLOYMENT_ID: ${'${{ github.event.inputs.deployment_id }}'}
+          JOB_STATUS: ${'${{ job.status }}'}
+        run: |
+          MESSAGE="Analysis failed"
+          if [ "$JOB_STATUS" == "success" ]; then MESSAGE="Analyze complete"; fi
+          PAYLOAD=$(cat <<EOF
+          {
+            "deploymentId": "$DEPLOYMENT_ID",
+            "event": "progress",
+            "step": "analyze",
+            "message": "$MESSAGE"
+          }
+          EOF
+          )
+          if [ -n "$WEBHOOK_URL" ] && [ -n "$WEBHOOK_TOKEN" ]; then
+            curl -sS -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Devyntra-Token: $WEBHOOK_TOKEN" \
+              -d "$PAYLOAD" || true
           fi
 `;
 }
@@ -868,7 +921,7 @@ export const deploy = onRequest({
     let analysisDispatchAt: number | undefined = undefined;
     if (!(await hasRecentRun(octokit, repoOwner, repoName, "analysis.yml"))) {
       analysisDispatchAt = Date.now();
-      const ok = await dispatchWithRetry(octokit, repoOwner, repoName, ".github/workflows/analysis.yml", defaultBranch);
+      const ok = await dispatchWithRetry(octokit, repoOwner, repoName, ".github/workflows/analysis.yml", defaultBranch, { deployment_id: deploymentId });
       if (!ok) throw new Error("GitHub did not accept workflow_dispatch for analysis.yml. Wait and retry.");
     }
 
@@ -924,12 +977,16 @@ export const deploy = onRequest({
     await new Promise(r => setTimeout(r, 500));
     
     if (!errorsFound) {
+      // Notify that Fix Issues stage is reached even if there are none
+      await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "fix", message: "Fix Issues" });
+      // small delay to preserve ordering client-side
+      await new Promise(r => setTimeout(r, 200));
       await deploymentRef.set({ 
         status: 'deploying',
-        message: 'Fix Issues skipped',
+        message: 'No issues found',
         updatedAt: admin.firestore.FieldValue.serverTimestamp() 
       }, { merge: true });
-      await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "fix", message: "Fix Issues skipped" });
+      await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "fix", message: "No issues found" });
     }
 
     // 4) If errors, call Jules API to fix and auto-merge (retry loop)
@@ -942,6 +999,7 @@ export const deploy = onRequest({
         attempts++;
         try {
           await setStatus("fixing", attempts === 1 ? "Errors found. Sending to Jules for auto-fix..." : "Errors persist. Re-running Jules fix...");
+          await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "fix", message: "Fix Issues" });
           await addLog(attempts === 1 ? "🛠️ Jules auto-fix: attempting to fix errors..." : "🛠️ Jules auto-fix: second attempt...");
           usedJules = true;
 
@@ -983,7 +1041,7 @@ export const deploy = onRequest({
           await setStatus("analyzing", "Re-running analysis after Jules fixes...");
           await addLog("🔁 Re-running analysis after Jules fixes...");
           {
-            const ok = await dispatchWithRetry(octokit, repoOwner, repoName, ".github/workflows/analysis.yml", defaultBranch);
+            const ok = await dispatchWithRetry(octokit, repoOwner, repoName, ".github/workflows/analysis.yml", defaultBranch, { deployment_id: deploymentId });
             if (!ok) throw new Error("GitHub did not accept workflow_dispatch for analysis.yml after fixes.");
           }
           analysisConclusion = await waitForLatestWorkflowConclusion(

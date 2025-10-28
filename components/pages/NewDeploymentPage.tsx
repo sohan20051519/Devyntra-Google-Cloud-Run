@@ -184,6 +184,7 @@ const NewDeploymentPage: React.FC = () => {
               msg.includes('Setup complete') ||
               msg.includes('Analyze complete') ||
               msg.includes('Fix Issues skipped') ||
+              msg.includes('No issues found') ||
               msg.includes('Fix Issues complete with jules') ||
               msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')
             ) return 'success';
@@ -279,12 +280,20 @@ const NewDeploymentPage: React.FC = () => {
           }
           
           // Step 2: Fix Issues
-          if (msg.includes('Fix Issues skipped')) {
+          if (msg.includes('No issues found')) {
+            next[2].details = 'No issues found';
+            next[2].status = 'success';
+          } else if (msg.includes('Fix Issues skipped')) {
             next[2].details = 'Fix Issues skipped';
             next[2].status = 'success';
           } else if (msg.includes('Fix Issues complete with jules')) {
             next[2].details = 'Fix Issues complete with jules';
             next[2].status = 'success';
+          } else if (/^Fix Issues$/.test(msg) || msg.startsWith('Fix Issues')) {
+            // Stage entered: reflect as in-progress if not already completed
+            if (next[2].status !== 'success') {
+              next[2].details = 'Fix Issues';
+            }
           } else if (next[2].status === 'in-progress') {
             next[2].details = msg || 'Applying fixes...';
           } else if (next[2].status === 'success' && (!next[2].details || next[2].details.includes('Waiting'))) {
