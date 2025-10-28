@@ -13,6 +13,101 @@ const firebaseConfig = {
   measurementId: "G-SWF3LQFBR0"
 };
 
+// Cancel an in-flight deployment
+export const cancelDeployment = async (deploymentId: string): Promise<{ ok: boolean; cancelled: boolean }> => {
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) throw new Error('User must be authenticated');
+  const idToken = await user.getIdToken();
+
+  // We only need auth; repoOwner/repoName are not required for cancel action
+  const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+    body: JSON.stringify({ action: 'cancel', deploymentId })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
+export const redeploy = async (repoOwner: string, repoName: string): Promise<{ actionsUrl: string }> => {
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) throw new Error('User must be authenticated');
+  const idToken = await user.getIdToken();
+
+  // Reuse token getter
+  const getToken = async (): Promise<string> => {
+    const localToken = localStorage.getItem('github_access_token');
+    if (localToken) return localToken;
+    const { doc, getDoc } = await import('firebase/firestore');
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.data();
+    if (!userData?.githubToken) throw new Error('GitHub token not found');
+    return userData.githubToken;
+  };
+
+  const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+    body: JSON.stringify({ repoOwner, repoName, githubToken: await getToken(), action: 'redeploy' })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
+export const rollback = async (repoOwner: string, repoName: string, serviceName?: string, region?: string): Promise<{ ok: boolean; deploymentUrl?: string | null; revision?: string }> => {
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) throw new Error('User must be authenticated');
+  const idToken = await user.getIdToken();
+
+  const getToken = async (): Promise<string> => {
+    const localToken = localStorage.getItem('github_access_token');
+    if (localToken) return localToken;
+    const { doc, getDoc } = await import('firebase/firestore');
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.data();
+    if (!userData?.githubToken) throw new Error('GitHub token not found');
+    return userData.githubToken;
+  };
+
+  const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+    body: JSON.stringify({ repoOwner, repoName, githubToken: await getToken(), action: 'rollback', serviceName, region })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
+export const deriveServiceName = (repoName: string) => repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 30) || 'web-service';
+
+export const deleteService = async (repoOwner: string, repoName: string, serviceName?: string, region?: string): Promise<{ ok: boolean; deleted: boolean; previousUrl?: string | null }> => {
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) throw new Error('User must be authenticated');
+  const idToken = await user.getIdToken();
+
+  const getToken = async (): Promise<string> => {
+    const localToken = localStorage.getItem('github_access_token');
+    if (localToken) return localToken;
+    const { doc, getDoc } = await import('firebase/firestore');
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.data();
+    if (!userData?.githubToken) throw new Error('GitHub token not found');
+    return userData.githubToken;
+  };
+
+  const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+    body: JSON.stringify({ repoOwner, repoName, githubToken: await getToken(), action: 'delete_service', serviceName: serviceName || deriveServiceName(repoName), region: region || 'us-central1' })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
@@ -35,6 +130,8 @@ export interface Deployment {
   prStatus?: 'open' | 'merged' | 'closed';
   deploymentUrl?: string;
   cloudRunServiceName?: string;
+  deploySubstep?: 'pipeline' | 'install' | 'build_image' | 'deploy';
+  lastStep?: string;
   dockerImage?: string;
   logs: string[];
   errors: string[];

@@ -1,30 +1,19 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
+import { watchDeployment } from '../../services/firestore';
 import { Globe, GitCommit, GitBranch } from 'lucide-react';
+import { redeploy, rollback, deriveServiceName, deleteDeployment, deleteService } from '../../services/firestore';
 
-const mockDeploymentLogs = [
-    { id: '1', time: '2 minutes ago', message: 'Deployment successful. Service is live.' },
-    { id: '2', time: '3 minutes ago', message: 'Finalizing deployment and running health checks.' },
-    { id: '3', time: '4 minutes ago', message: 'Pushing image to Google Cloud Registry.' },
-    { id: '4', time: '5 minutes ago', message: 'Successfully built docker image.' },
-    { id: '5', time: '6 minutes ago', message: 'Build process started.' },
-];
+const mockDeploymentLogs: string[] = [];
 
 const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => {
   const baseClasses = 'px-3 py-1 text-xs font-medium rounded-full inline-flex items-center gap-1.5';
-  switch (status) {
-    case 'Deployed':
-      return <span className={`${baseClasses} bg-green-100 text-green-800`}><Icons.CheckCircle size={12} />Deployed</span>;
-    case 'Building':
-      return <span className={`${baseClasses} bg-blue-100 text-blue-800`}><Icons.Spinner size={12} className="animate-spin" />Building</span>;
-    case 'Failed':
-      return <span className={`${baseClasses} bg-error-container text-on-error-container`}><Icons.XCircle size={12} />Failed</span>;
-    default:
-      return <span className={`${baseClasses} bg-gray-100 text-gray-800`}>{status}</span>;
-  }
+  if (status === 'deployed') return <span className={`${baseClasses} bg-green-100 text-green-800`}><Icons.CheckCircle size={12} />Deployed</span>;
+  if (status === 'failed') return <span className={`${baseClasses} bg-error-container text-on-error-container`}><Icons.XCircle size={12} />Failed</span>;
+  return <span className={`${baseClasses} bg-blue-100 text-blue-800`}><Icons.Spinner size={12} className="animate-spin" />{status.replace(/_/g,' ')}</span>;
 };
 
 const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string | React.ReactNode }> = ({ icon, label, value }) => (
@@ -38,8 +27,85 @@ const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string |
 )
 
 const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onBack, onViewLogs }) => {
+    const [busy, setBusy] = useState<'idle' | 'redeploy' | 'rollback' | 'delete'>('idle');
+    const [liveStatus, setLiveStatus] = useState<Deployment['status'] | undefined>(deployment.status);
+    const [liveMessage, setLiveMessage] = useState<string | undefined>(undefined);
+    const [liveUrl, setLiveUrl] = useState<string | undefined>(deployment.deploymentUrl || undefined);
+    const [liveSubstep, setLiveSubstep] = useState<string | undefined>(undefined);
+    const [liveLogs, setLiveLogs] = useState<string[]>([]);
+
+    const actionsUrl = `https://github.com/${deployment.repoOwner}/${deployment.repoName}/actions/workflows/deploy-cloudrun.yml`;
+    const serviceName = deployment.cloudRunServiceName || deriveServiceName(deployment.repoName);
+    const effectiveId = deployment.id || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('id') || undefined : undefined);
+
+    useEffect(() => {
+      if (!effectiveId) return;
+      const unsubscribe = watchDeployment(String(effectiveId), (d) => {
+        if (!d) return;
+        if (d.status) setLiveStatus(d.status);
+        if (typeof d.message === 'string') setLiveMessage(d.message);
+        if (typeof d.deploySubstep === 'string') setLiveSubstep(d.deploySubstep);
+        if (typeof d.deploymentUrl === 'string' && d.deploymentUrl) setLiveUrl(d.deploymentUrl);
+        if (Array.isArray(d.logs) && d.logs.length) {
+          setLiveLogs(prev => {
+            const existing = new Set(prev);
+            const add = d.logs.slice(-10).filter(l => !existing.has(l));
+            return add.length ? [...prev, ...add] : prev;
+          });
+        }
+      });
+      return () => { try { unsubscribe(); } catch {} };
+    }, [effectiveId]);
+
+    const handleRedeploy = async () => {
+      try {
+        setBusy('redeploy');
+        const res = await redeploy(deployment.repoOwner, deployment.repoName);
+        window.open(res.actionsUrl || actionsUrl, '_blank');
+      } catch (e:any) {
+        alert(`Redeploy failed: ${e?.message || e}`);
+      } finally {
+        setBusy('idle');
+      }
+    };
+
+    const handleRollback = async () => {
+      try {
+        setBusy('rollback');
+        const res = await rollback(deployment.repoOwner, deployment.repoName, serviceName);
+        if (res.ok) {
+          if (res.deploymentUrl) window.open(res.deploymentUrl, '_blank');
+          alert('Rollback triggered to previous revision.');
+        } else {
+          alert('Rollback request failed.');
+        }
+      } catch (e:any) {
+        alert(`Rollback failed: ${e?.message || e}`);
+      } finally {
+        setBusy('idle');
+      }
+    };
+
+    const handleDelete = async () => {
+      if (!confirm('Delete this Cloud Run service and remove the deployment record? This action is irreversible.')) return;
+      try {
+        setBusy('delete');
+        // Delete Cloud Run service first
+        await deleteService(deployment.repoOwner, deployment.repoName, serviceName);
+        // Then remove record from Firestore
+        await deleteDeployment(deployment.id);
+        alert('Cloud Run service deleted and deployment record removed.');
+        onBack();
+      } catch (e:any) {
+        alert(`Delete failed: ${e?.message || e}`);
+      } finally {
+        setBusy('idle');
+      }
+    };
+
     return (
         <div className="flex flex-col h-full animate-fade-in-up">
+
             {/* Header */}
             <div className="flex-shrink-0">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8">
@@ -49,16 +115,16 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                         </Button>
                         <div className="flex items-center gap-4">
                             <h1 className="text-3xl font-bold text-on-background">{deployment.repoName}</h1>
-                            <StatusBadge status={deployment.status}/>
+                            <StatusBadge status={liveStatus || deployment.status}/>
                         </div>
                     </div>
                     <div className="mt-4 sm:mt-0 flex gap-2">
-                        {deployment.url !== '-' && (
-                            <a href={deployment.url} target="_blank" rel="noopener noreferrer">
+                        {deployment.deploymentUrl && (
+                            <a href={deployment.deploymentUrl} target="_blank" rel="noopener noreferrer">
                                 <Button variant="outlined">Visit Site</Button>
                             </a>
                         )}
-                        <Button variant="filled">Redeploy</Button>
+                        <Button variant="filled" disabled={busy!=='idle'} onClick={handleRedeploy}>{busy==='redeploy' ? 'Redeploying...' : 'Redeploy'}</Button>
                     </div>
                 </div>
             </div>
@@ -70,10 +136,13 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                       <Card>
                           <h2 className="text-xl font-medium text-on-surface mb-4 border-b border-outline/30 pb-3">Deployment Details</h2>
                           <div className="divide-y divide-outline/20">
-                              <InfoItem icon={<Globe size={16}/>} label="Live URL" value={deployment.url !== '-' ? <a href={deployment.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{deployment.url}</a> : '-'}/>
-                              <InfoItem icon={<GitBranch size={16}/>} label="Branch" value={deployment.branch} />
-                              <InfoItem icon={<GitCommit size={16}/>} label="Commit" value={<span className="font-mono text-xs">{deployment.commitHash}</span>} />
-                              <InfoItem icon={<Icons.Deployments size={16}/>} label="Deployed At" value={deployment.deployedAt} />
+                              <InfoItem icon={<Globe size={16}/>} label="Live URL" value={liveUrl ? <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{liveUrl}</a> : '-'} />
+                              <InfoItem icon={<GitBranch size={16}/>} label="Service" value={serviceName} />
+                              <InfoItem icon={<Icons.Deployments size={16}/>} label="Status" value={(liveStatus || deployment.status) + (liveSubstep ? ` • ${liveSubstep}` : '')} />
+                              {liveMessage && (
+                                <div className="text-sm text-on-surface-variant mt-2">{liveMessage}</div>
+                              )}
+
                           </div>
                       </Card>
 
@@ -83,12 +152,32 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                             <Button variant="text" onClick={() => onViewLogs(deployment)}>View all logs <Icons.ArrowRight size={14} className="ml-1"/></Button>
                           </div>
                           <div className="font-mono text-sm bg-inverse-surface text-inverse-on-surface rounded-lg p-4 overflow-x-auto">
-                              {mockDeploymentLogs.map(log => (
-                                  <div key={log.id} className="flex">
-                                      <span className="text-inverse-on-surface/50 mr-4 whitespace-nowrap">{log.time}</span>
-                                      <p className="break-words text-inverse-on-surface">{log.message}</p>
-                                  </div>
-                              ))}
+                              {liveLogs && liveLogs.length > 0 ? (
+                                liveLogs.map((line, idx) => {
+                                  const cls = (() => {
+                                    if (/❌|failed/i.test(line)) return 'text-red-400';
+                                    if (/⚠️|warn/i.test(line)) return 'text-yellow-400';
+                                    if (
+                                      /✅/.test(line) ||
+                                      /🔔/.test(line) ||
+                                      /Setup complete/.test(line) ||
+                                      /Analyze complete/.test(line) ||
+                                      /Fix Issues skipped/.test(line) ||
+                                      /Fix Issues complete with jules/.test(line) ||
+                                      /auto create ci\/cd pipeline and deployed with docker using gcp/.test(line)
+                                    ) return 'text-green-400';
+                                    return 'text-inverse-on-surface';
+                                  })();
+                                  return (
+                                    <div key={idx} className="flex">
+                                      <span className="text-inverse-on-surface/50 mr-4 whitespace-nowrap">•</span>
+                                      <p className={`break-words ${cls}`}>{line}</p>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <p className="text-inverse-on-surface/70">Waiting for logs...</p>
+                              )}
                           </div>
                       </Card>
                   </div>
@@ -98,9 +187,9 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                       <Card>
                           <h2 className="text-xl font-medium text-on-surface mb-4">Manage</h2>
                           <div className="space-y-2">
-                              <Button variant="outlined" className="w-full">Rollback to Previous Version</Button>
-                              <Button variant="outlined" className="w-full">View GitHub Actions</Button>
-                              <Button variant="outlined" className="border-error text-error hover:bg-error-container w-full mt-4">Delete Deployment</Button>
+                              <Button variant="outlined" className="w-full" disabled={busy!=='idle'} onClick={handleRollback}>{busy==='rollback' ? 'Rolling back...' : 'Rollback to Previous Version'}</Button>
+                              <Button variant="outlined" className="w-full" onClick={() => window.open(actionsUrl, '_blank')}>View GitHub Actions</Button>
+                              <Button variant="outlined" className="border-error text-error hover:bg-error-container w-full mt-4" disabled={busy!=='idle'} onClick={handleDelete}>{busy==='delete' ? 'Deleting...' : 'Delete Deployment (Service + Record)'}</Button>
                           </div>
                       </Card>
 

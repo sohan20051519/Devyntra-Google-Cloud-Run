@@ -26,6 +26,8 @@ export interface Deployment {
   deploymentUrl?: string;
   cloudRunServiceName?: string;
   dockerImage?: string;
+  deploySubstep?: 'pipeline' | 'install' | 'build_image' | 'deploy';
+  lastStep?: string;
   logs: string[];
   errors: string[];
   createdAt: any;
