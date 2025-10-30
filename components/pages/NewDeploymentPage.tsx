@@ -83,6 +83,7 @@ const NewDeploymentPage: React.FC = () => {
   const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
   const lastLogsCountRef = useRef<number>(0);
   const lastMessageRef = useRef<string | null>(null);
+  const highestStepIndexRef = useRef<number>(-1);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -122,6 +123,7 @@ const NewDeploymentPage: React.FC = () => {
     setTerminalLogs([]);
     lastLogsCountRef.current = 0;
     lastMessageRef.current = null;
+    highestStepIndexRef.current = -1;
 
     try {
       console.log('Starting deployment for:', selectedRepoData);
@@ -261,11 +263,19 @@ const NewDeploymentPage: React.FC = () => {
 
         const targetStepIndex = getStepIndexForStatus(data.status as Deployment['status']);
 
+        // Prevent moving backwards
+        if (targetStepIndex < highestStepIndexRef.current) {
+          console.log(`[NewDeployment] Ignoring out-of-order status update. Current highest: ${highestStepIndexRef.current}, received: ${targetStepIndex}`);
+          return;
+        }
+
         setDeploymentSteps((prevSteps) => {
           let next = [...prevSteps.map(s => ({ ...s }))];
 
           // 1. Update step statuses based on the current overall deployment status
           if (targetStepIndex !== -1) {
+            highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
+
             for (let i = 0; i < next.length; i++) {
               if (i < targetStepIndex) {
                 next[i].status = 'success';
