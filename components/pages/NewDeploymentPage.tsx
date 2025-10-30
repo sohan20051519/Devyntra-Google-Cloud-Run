@@ -238,87 +238,82 @@ const NewDeploymentPage: React.FC = () => {
       // Progress mapping
       if (typeof data.status === 'string') {
         const msg: string = data.message || '';
-        const lastStep = (data as any)?.lastStep ? String((data as any).lastStep).toLowerCase() : '';
-        let target: number | null = null;
-        if (lastStep) {
-          if (lastStep === 'setup' || lastStep === 'docker') target = 0;
-          else if (lastStep === 'analyze') target = 1;
-          else if (lastStep === 'fix') target = 2;
-          else if (lastStep === 'deploy') target = 3;
-        }
-        if (data.status === 'deployed') target = 4;
-        const hasTarget = target !== null;
-        if (!hasTarget) {
-          console.log('[NewDeployment] Waiting for webhook lastStep; not auto-advancing');
-        } else {
-          console.log('[NewDeployment] Mapped lastStep to phase:', { lastStep, targetPhase: target });
-        }
-        
+
+        // New mapping logic based on status
+        const getStepIndexForStatus = (status: Deployment['status']): number => {
+          switch (status) {
+            case 'starting':
+            case 'injecting_secrets':
+              return 0; // Setup
+            case 'detecting_language':
+            case 'analyzing':
+              return 1; // Analyze
+            case 'fixing':
+              return 2; // Fix Issues
+            case 'deploying':
+              return 3; // Deploy
+            case 'deployed':
+              return 4; // Complete
+            default:
+              return -1;
+          }
+        };
+
+        const targetStepIndex = getStepIndexForStatus(data.status as Deployment['status']);
+
         setDeploymentSteps((prevSteps) => {
-          const next = prevSteps.map(s => ({ ...s }));
-          
-          // Set status for each step
-          if (hasTarget) {
+          let next = [...prevSteps.map(s => ({ ...s }))];
+
+          // 1. Update step statuses based on the current overall deployment status
+          if (targetStepIndex !== -1) {
             for (let i = 0; i < next.length; i++) {
-              if (i < (target as number)) {
+              if (i < targetStepIndex) {
                 next[i].status = 'success';
-              } else if (i === (target as number)) {
+              } else if (i === targetStepIndex) {
                 next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
               } else {
                 next[i].status = 'pending';
               }
             }
           }
-          
-          // Handle failure state
+
+          // Handle failure state - mark the current or last active step as failed
           if (data.status === 'failed') {
-            const errIdx = next.findIndex(s => s.status === 'in-progress');
-            const idx = errIdx >= 0 ? errIdx : Math.min(typeof target === 'number' ? target : 0, next.length - 1);
-            next[idx] = { ...next[idx], status: 'error', details: msg || 'Failed' };
+            const inProgressIndex = next.findIndex(s => s.status === 'in-progress');
+            const targetFailureIndex = inProgressIndex !== -1 ? inProgressIndex : (targetStepIndex >= 0 ? targetStepIndex : prevSteps.findIndex(s => s.status !== 'success'));
+            if (targetFailureIndex !== -1) {
+                next[targetFailureIndex].status = 'error';
+                next[targetFailureIndex].details = msg || 'An error occurred';
+            }
           }
-          
-          // Update details based on webhook messages (priority) or current step state
-          // Only update details for pending or in-progress steps to avoid overwriting completed states
-          
+
+          // 2. Update details based on specific messages (from original logic)
+          // This allows for more granular feedback within a step.
+
           // Step 0: Setup
-          if (msg.includes('Docker setup complete')) {
-            next[0].details = 'Docker setup complete';
-          } else if (msg.includes('Docker setup')) {
-            next[0].details = 'Docker setup';
-          } else if (msg.includes('Setup complete')) {
-            next[0].details = 'Setup complete';
+          if (msg.includes('Docker setup complete') || msg.includes('Setup complete')) {
+            next[0].details = msg;
             next[0].status = 'success';
           } else if (next[0].status === 'in-progress') {
             next[0].details = msg || 'Setting up secrets and configuration...';
           }
-          
+
           // Step 1: Analyze
           if (msg.includes('Analyze complete')) {
-            next[1].details = 'Analyze complete';
+            next[1].details = msg;
             next[1].status = 'success';
           } else if (next[1].status === 'in-progress') {
             next[1].details = msg || 'Analyzing codebase...';
           }
-          
+
           // Step 2: Fix Issues
-          if (msg.includes('No issues found')) {
-            next[2].details = 'No issues found';
+          if (msg.includes('No issues found') || msg.includes('Fix Issues skipped') || msg.includes('Fix Issues complete')) {
+            next[2].details = msg;
             next[2].status = 'success';
-          } else if (msg.includes('Fix Issues skipped')) {
-            next[2].details = 'Fix Issues skipped';
-            next[2].status = 'success';
-          } else if (msg.includes('Fix Issues complete with jules')) {
-            next[2].details = 'Fix Issues complete with jules';
-            next[2].status = 'success';
-          } else if (/^Fix Issues$/.test(msg) || msg.startsWith('Fix Issues')) {
-            // Stage entered: reflect as in-progress if not already completed
-            if (next[2].status !== 'success') {
-              next[2].details = 'Fix Issues';
-            }
           } else if (next[2].status === 'in-progress') {
             next[2].details = msg || 'Applying fixes...';
           }
-          
+
           // Step 3: Deploy
           if (msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')) {
             next[3].details = 'Auto CI/CD pipeline deployed with Docker on GCP';
@@ -328,21 +323,20 @@ const NewDeploymentPage: React.FC = () => {
           }
           
           // Step 4: Complete
-          if (target === 4 || data.status === 'deployed') {
-            // Only set a detail if webhook provided one; otherwise leave as-is
-            next[4].details = msg || next[4].details;
+          if (data.status === 'deployed') {
+            next[4].details = msg || 'Deployment is live!';
             next[4].status = 'success';
           }
-          
-          // Set current step index
+
+          // 3. Set the active step for UI highlighting
           const inProgIdx = next.findIndex(s => s.status === 'in-progress');
           if (inProgIdx !== -1) {
             setCurrentStepIndex(inProgIdx);
           } else {
-            const lastSuccess = [...next].map((s, i) => ({ s, i })).filter(x => x.s.status === 'success').map(x => x.i).pop();
-            setCurrentStepIndex(typeof lastSuccess === 'number' ? lastSuccess : 0);
+            const lastSuccessIdx = next.map(s => s.status).lastIndexOf('success');
+            setCurrentStepIndex(lastSuccessIdx !== -1 ? lastSuccessIdx : 0);
           }
-          
+
           return next;
         });
       }
