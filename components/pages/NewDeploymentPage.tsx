@@ -274,7 +274,7 @@ const NewDeploymentPage: React.FC = () => {
         // Animate the initial steps if the first update is for a later step
         if (isFirstUpdateRef.current && targetStepIndex > 0) {
           isFirstUpdateRef.current = false;
-          let animatedSteps = [...initialSteps];
+          // Animate previous steps to success
           for (let i = 0; i < targetStepIndex; i++) {
             setTimeout(() => {
               setDeploymentSteps(prev => {
@@ -284,99 +284,100 @@ const NewDeploymentPage: React.FC = () => {
               });
             }, i * 200); // Stagger the animation
           }
-          // After the animation, set the final state
+
+          // Set the current step to in-progress after the animation
           setTimeout(() => {
             setDeploymentSteps(prev => {
-                const finalSteps = [...prev];
-                for(let i = 0; i < targetStepIndex; i++) {
-                    finalSteps[i] = { ...finalSteps[i], status: 'success' };
-                }
-                finalSteps[targetStepIndex] = { ...finalSteps[targetStepIndex], status: 'in-progress' };
-                return finalSteps;
+              const finalSteps = [...prev];
+              // Ensure all previous are success
+              for (let i = 0; i < targetStepIndex; i++) {
+                finalSteps[i] = { ...finalSteps[i], status: 'success' };
+              }
+              finalSteps[targetStepIndex] = { ...finalSteps[targetStepIndex], status: 'in-progress', details: msg };
+              setCurrentStepIndex(targetStepIndex);
+              return finalSteps;
             });
           }, targetStepIndex * 200);
+
         } else {
-            isFirstUpdateRef.current = false;
-            setDeploymentSteps((prevSteps) => {
-                let next = [...prevSteps.map(s => ({ ...s }))];
+          // Normal update
+          isFirstUpdateRef.current = false;
+          setDeploymentSteps((prevSteps) => {
+            let next = [...prevSteps.map(s => ({ ...s }))];
 
-                // 1. Update step statuses based on the current overall deployment status
-                if (targetStepIndex !== -1) {
-                highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
+            // 1. Update step statuses based on the current overall deployment status
+            if (targetStepIndex !== -1) {
+              highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
 
-                for (let i = 0; i < next.length; i++) {
-                    if (i < targetStepIndex) {
-                    next[i].status = 'success';
-                    } else if (i === targetStepIndex) {
-                    next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
-                    } else {
-                    next[i].status = 'pending';
-                    }
+              for (let i = 0; i < next.length; i++) {
+                if (i < targetStepIndex) {
+                  next[i].status = 'success';
+                } else if (i === targetStepIndex) {
+                  next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
+                } else {
+                  next[i].status = 'pending';
                 }
-                }
+              }
+            }
 
-          // Handle failure state - mark the current or last active step as failed
-          if (data.status === 'failed') {
-            const inProgressIndex = next.findIndex(s => s.status === 'in-progress');
-            const targetFailureIndex = inProgressIndex !== -1 ? inProgressIndex : (targetStepIndex >= 0 ? targetStepIndex : prevSteps.findIndex(s => s.status !== 'success'));
-            if (targetFailureIndex !== -1) {
+            // Handle failure state - mark the current or last active step as failed
+            if (data.status === 'failed') {
+              const inProgressIndex = next.findIndex(s => s.status === 'in-progress');
+              const targetFailureIndex = inProgressIndex !== -1 ? inProgressIndex : (targetStepIndex >= 0 ? targetStepIndex : prevSteps.findIndex(s => s.status !== 'success'));
+              if (targetFailureIndex !== -1) {
                 next[targetFailureIndex].status = 'error';
                 next[targetFailureIndex].details = msg || 'An error occurred';
+              }
             }
-          }
 
-          // 2. Update details based on specific messages (from original logic)
-          // This allows for more granular feedback within a step.
+            // 2. Update details based on specific messages (from original logic)
+            // This allows for more granular feedback within a step.
+            // Step 0: Setup
+            if (msg.includes('Docker setup complete') || msg.includes('Setup complete')) {
+              next[0].details = msg;
+              next[0].status = 'success';
+            } else if (next[0].status === 'in-progress') {
+              next[0].details = msg || 'Setting up secrets and configuration...';
+            }
+            // Step 1: Analyze
+            if (msg.includes('Analyze complete')) {
+              next[1].details = msg;
+              next[1].status = 'success';
+            } else if (next[1].status === 'in-progress') {
+              next[1].details = msg || 'Analyzing codebase...';
+            }
+            // Step 2: Fix Issues
+            if (msg.includes('No issues found') || msg.includes('Fix Issues skipped') || msg.includes('Fix Issues complete')) {
+              next[2].details = msg;
+              next[2].status = 'success';
+            } else if (next[2].status === 'in-progress') {
+              next[2].details = msg || 'Applying fixes...';
+            }
+            // Step 3: Deploy
+            if (msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')) {
+              next[3].details = 'Auto CI/CD pipeline deployed with Docker on GCP';
+              next[3].status = 'success';
+            } else if (next[3].status === 'in-progress') {
+              next[3].details = msg || 'Deploying to Cloud Run...';
+            }
+            // Step 4: Complete
+            if (data.status === 'deployed') {
+              next[4].details = msg || 'Deployment is live!';
+              next[4].status = 'success';
+            }
 
-          // Step 0: Setup
-          if (msg.includes('Docker setup complete') || msg.includes('Setup complete')) {
-            next[0].details = msg;
-            next[0].status = 'success';
-          } else if (next[0].status === 'in-progress') {
-            next[0].details = msg || 'Setting up secrets and configuration...';
-          }
+            // 3. Set the active step for UI highlighting
+            const inProgIdx = next.findIndex(s => s.status === 'in-progress');
+            if (inProgIdx !== -1) {
+              setCurrentStepIndex(inProgIdx);
+            } else {
+              const lastSuccessIdx = next.map(s => s.status).lastIndexOf('success');
+              setCurrentStepIndex(lastSuccessIdx !== -1 ? lastSuccessIdx : 0);
+            }
 
-          // Step 1: Analyze
-          if (msg.includes('Analyze complete')) {
-            next[1].details = msg;
-            next[1].status = 'success';
-          } else if (next[1].status === 'in-progress') {
-            next[1].details = msg || 'Analyzing codebase...';
-          }
-
-          // Step 2: Fix Issues
-          if (msg.includes('No issues found') || msg.includes('Fix Issues skipped') || msg.includes('Fix Issues complete')) {
-            next[2].details = msg;
-            next[2].status = 'success';
-          } else if (next[2].status === 'in-progress') {
-            next[2].details = msg || 'Applying fixes...';
-          }
-
-          // Step 3: Deploy
-          if (msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')) {
-            next[3].details = 'Auto CI/CD pipeline deployed with Docker on GCP';
-            next[3].status = 'success';
-          } else if (next[3].status === 'in-progress') {
-            next[3].details = msg || 'Deploying to Cloud Run...';
-          }
-          
-          // Step 4: Complete
-          if (data.status === 'deployed') {
-            next[4].details = msg || 'Deployment is live!';
-            next[4].status = 'success';
-          }
-
-          // 3. Set the active step for UI highlighting
-          const inProgIdx = next.findIndex(s => s.status === 'in-progress');
-          if (inProgIdx !== -1) {
-            setCurrentStepIndex(inProgIdx);
-          } else {
-            const lastSuccessIdx = next.map(s => s.status).lastIndexOf('success');
-            setCurrentStepIndex(lastSuccessIdx !== -1 ? lastSuccessIdx : 0);
-          }
-
-          return next;
-        });
+            return next;
+          });
+        }
       }
       
       // Update deployment URL when available
