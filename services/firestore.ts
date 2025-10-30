@@ -13,6 +13,83 @@ const firebaseConfig = {
   measurementId: "G-SWF3LQFBR0"
 };
 
+export const getDeploymentById = async (deploymentId: string): Promise<Deployment | null> => {
+  const { doc, getDoc } = await import('firebase/firestore');
+  try {
+    const ref = doc(db, 'deployments', deploymentId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as any) } as Deployment;
+  } catch (e) {
+    console.error('getDeploymentById failed', e);
+    return null;
+  }
+};
+
+// Delete all in-progress deployments for a user
+export const deleteInProgressDeployments = async (userId: string) => {
+  const { doc, deleteDoc } = await import('firebase/firestore');
+  try {
+    const deploymentsRef = collection(db, 'deployments');
+    // Try server-side filter using 'in' operator; may require an index
+    const statuses: any[] = ['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'];
+    let docs: any[] = [];
+    try {
+      const q = query(
+        deploymentsRef,
+        where('userId', '==', userId),
+        where('status', 'in', statuses as any)
+      );
+      const snapshot = await getDocs(q);
+      docs = snapshot.docs;
+    } catch {
+      // Fallback: fetch all user's deployments and filter client-side
+      const q = query(
+        deploymentsRef,
+        where('userId', '==', userId)
+      );
+      const snapshot = await getDocs(q);
+      docs = snapshot.docs.filter(d => statuses.includes((d.data() as any)?.status));
+    }
+    const deletePromises = docs.map(docSnap => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+    return deletePromises.length;
+  } catch (error) {
+    console.error('Error deleting in-progress deployments:', error);
+    throw error;
+  }
+};
+
+export const setAutoRedeploy = async (deploymentId: string, repoOwner: string, repoName: string, enable: boolean): Promise<{ ok: boolean; enabled: boolean }> => {
+  const { auth } = await import('./firebase');
+  const user = auth.currentUser;
+  if (!user) throw new Error('User must be authenticated');
+  const idToken = await user.getIdToken();
+  const getToken = async (): Promise<string> => {
+    const localToken = localStorage.getItem('github_access_token');
+    if (localToken) return localToken;
+    const { doc, getDoc } = await import('firebase/firestore');
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.data();
+    if (!userData?.githubToken) throw new Error('GitHub token not found');
+    return userData.githubToken;
+  };
+  const response = await fetch('https://deploy-mcwd6yzjia-uc.a.run.app', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+    body: JSON.stringify({
+      repoOwner,
+      repoName,
+      githubToken: await getToken(),
+      action: 'set_auto_redeploy',
+      enable,
+      deploymentId,
+    })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
 // Cancel an in-flight deployment
 export const cancelDeployment = async (deploymentId: string): Promise<{ ok: boolean; cancelled: boolean }> => {
   const { auth } = await import('./firebase');
@@ -242,7 +319,7 @@ export const getDeploymentStats = async (userId: string) => {
       total: deployments.length,
       deployed: deployments.filter(d => d.status === 'deployed').length,
       failed: deployments.filter(d => d.status === 'failed').length,
-      inProgress: deployments.filter(d => ['detecting_language', 'analyzing', 'fixing', 'deploying'].includes(d.status)).length,
+      inProgress: deployments.filter(d => ['starting','injecting_secrets','detecting_language', 'analyzing', 'fixing', 'deploying'].includes(d.status)).length,
     };
     
     return stats;

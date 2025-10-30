@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import { onAuthStateChanged, signOutUser } from './services/firebase';
@@ -9,8 +9,18 @@ const App: React.FC = () => {
   const [user, setUser] = useState<any | null>(null);
   const [authInitializing, setAuthInitializing] = useState<boolean>(true);
 
+  const loggingOutRef = useRef(false);
   useEffect(() => {
     const unsub = onAuthStateChanged((u) => {
+      // If we're in the middle of logout, ignore transient auth events
+      if (loggingOutRef.current) {
+        if (!u) {
+          // once confirmed signed out, allow events again
+          loggingOutRef.current = false;
+        } else {
+          return;
+        }
+      }
       setUser(u);
       setIsAuthenticated(!!u);
       setAuthInitializing(false);
@@ -23,12 +33,16 @@ const App: React.FC = () => {
   }, []);
   
   const handleLogout = useCallback(async () => {
+    loggingOutRef.current = true;
     try {
       await signOutUser();
     } catch (e) {
       console.error('Sign out failed', e);
     }
-    // auth listener will update isAuthenticated and user
+    setUser(null);
+    setIsAuthenticated(false);
+    setAuthInitializing(false);
+    try { window.location.hash = ''; } catch {}
   }, []);
 
   return (

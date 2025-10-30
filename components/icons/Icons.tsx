@@ -23,6 +23,8 @@ import {
   Menu,
   ArrowLeft,
   Key,
+  Info,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const Icons = {
@@ -49,4 +51,6 @@ export const Icons = {
   Menu: Menu,
   ArrowLeft: ArrowLeft,
   Key: Key,
+  Info: Info,
+  AlertTriangle: AlertTriangle,
 };

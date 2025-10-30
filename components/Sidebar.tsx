@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { Icons } from './icons/Icons';
 import { Page } from '../types';
-import { signOutUser, signInWithGitHub } from '../services/firebase';
+import { signOutUser, signInWithGitHub, hardSignOut } from '../services/firebase';
 import ConfirmationModal from './ui/ConfirmationModal';
 
 interface SidebarProps {
@@ -62,11 +61,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, onLogout, 
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
-    // Sign out from Firebase and invoke parent logout
-    signOutUser().catch(e => console.error('Sign out error', e)).finally(() => {
-      onLogout();
-      setIsOpen(false);
-    });
+    // Delegate sign-out and routing to App
+    onLogout();
+    setIsOpen(false);
   };
 
   const handleLogoutCancel = () => {

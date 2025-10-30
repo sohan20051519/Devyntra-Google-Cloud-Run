@@ -147,6 +147,36 @@ export async function signOutUser() {
   return fbSignOut(auth);
 }
 
+export async function hardSignOut() {
+  try {
+    try {
+      localStorage.removeItem('github_access_token');
+      localStorage.removeItem('github_email');
+    } catch {}
+    try {
+      sessionStorage.clear();
+    } catch {}
+    try {
+      if ('indexedDB' in window && (indexedDB as any).databases) {
+        const dbs = await (indexedDB as any).databases();
+        for (const db of dbs) {
+          try {
+            if (db.name && /firebase/i.test(db.name)) {
+              await new Promise((resolve) => {
+                const req = indexedDB.deleteDatabase(db.name as string);
+                req.onsuccess = () => resolve(true as any);
+                req.onerror = () => resolve(false as any);
+              });
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  } finally {
+    try { await fbSignOut(auth); } catch {}
+  }
+}
+
 export async function updateDisplayName(name: string) {
   if (!auth.currentUser) throw new Error('No authenticated user');
   return updateProfile(auth.currentUser, { displayName: name });

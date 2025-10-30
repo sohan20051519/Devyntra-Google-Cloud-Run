@@ -4,7 +4,7 @@ import { Icons } from '../icons/Icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getDeploymentStats, getRecentActivity } from '../../services/firestore';
 import { formatTimestamp } from '../../services/utils';
-import { auth } from '../../services/firebase';
+import { auth, onAuthStateChanged } from '../../services/firebase';
 
 const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode; color: string; }> = ({ title, value, icon, color }) => (
     <Card className="flex items-center p-6">
@@ -24,18 +24,15 @@ const OverviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsub: any = null;
     const loadData = async () => {
-      if (!auth.currentUser) {
-        setLoading(false);
-        return;
-      }
-
+      if (!auth.currentUser) { setLoading(false); return; }
       try {
+        setLoading(true);
         const [statsData, activityData] = await Promise.all([
           getDeploymentStats(auth.currentUser.uid),
           getRecentActivity(auth.currentUser.uid, 10)
         ]);
-        
         setStats(statsData);
         setRecentActivity(activityData);
       } catch (error) {
@@ -44,8 +41,10 @@ const OverviewPage: React.FC = () => {
         setLoading(false);
       }
     };
-
+    unsub = onAuthStateChanged(() => { loadData(); });
+    // also initial
     loadData();
+    return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
   // Generate chart data from recent activity
@@ -77,7 +76,10 @@ const OverviewPage: React.FC = () => {
     return (
       <div className="flex flex-col h-full animate-fade-in-up">
         <div className="flex-shrink-0">
-          <h1 className="text-3xl font-bold text-on-background mb-8">Overview</h1>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-3xl font-bold text-on-background">Overview</h1>
+            <button className="text-sm px-3 py-1 rounded-lg border border-outline/30 text-on-surface-variant hover:bg-surface-variant" onClick={() => window.location.reload()}>Refresh</button>
+          </div>
         </div>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -92,7 +94,10 @@ const OverviewPage: React.FC = () => {
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold text-on-background mb-8">Overview</h1>
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold text-on-background">Overview</h1>
+          <button className="text-sm px-3 py-1 rounded-lg border border-outline/30 text-on-surface-variant hover:bg-surface-variant" onClick={() => window.location.reload()}>Refresh</button>
+        </div>
       </div>
       
       <div className="flex-1 overflow-y-auto">

@@ -53,6 +53,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isActive, className = '' }) =
 
   return (
     <div className={`bg-gray-900 rounded-lg border border-gray-700 overflow-hidden ${className}`}>
+      <style>{`.no-scrollbar::-webkit-scrollbar{display:none}`}</style>
       {/* Terminal Header */}
       <div className="bg-gray-800 px-4 py-2 flex items-center justify-between border-b border-gray-700">
         <div className="flex items-center gap-2">
@@ -83,8 +84,8 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isActive, className = '' }) =
       {!isMinimized && (
         <div
           ref={terminalRef}
-          className="h-64 overflow-y-auto p-4 font-mono text-sm bg-gray-900"
-          style={{ scrollbarWidth: 'thin' }}
+          className="h-96 overflow-y-auto p-4 font-mono text-sm bg-gray-900 no-scrollbar"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {logs.length === 0 ? (
             <div className="text-gray-500 italic">

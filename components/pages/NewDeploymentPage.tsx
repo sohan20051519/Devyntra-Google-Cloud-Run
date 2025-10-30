@@ -4,10 +4,12 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
 import { fetchUserRepos, checkRepoPermission } from '../../services/github';
-import { startDeployment, watchDeployment, cancelDeployment } from '../../services/firestore';
-import { checkGitHubTokenStatus, signInWithGitHub, reauthorizeWithGitHub, forceManualGitHubReauth } from '../../services/firebase';
+import { startDeployment, watchDeployment, cancelDeployment, getDeployments } from '../../services/firestore';
+import { checkGitHubTokenStatus, signInWithGitHub, reauthorizeWithGitHub, forceManualGitHubReauth, auth } from '../../services/firebase';
 import { Deployment } from '../../types';
 import Terminal from '../ui/Terminal';
+import ConfirmationModal from '../ui/ConfirmationModal';
+import InlineAlert from '../ui/InlineAlert';
 
 const mockRepos: Repository[] = [
   { id: '1', name: 'project-phoenix', owner: 'john-doe', url: '', lastUpdate: '2 hours ago' },
@@ -24,13 +26,13 @@ interface DeploymentStep {
   icon: React.ReactNode;
 }
 
-// Consolidated 5-stage progress
+// Consolidated 5-stage progress (details will be filled by webhook updates)
 const initialSteps: DeploymentStep[] = [
-  { name: 'Setup', status: 'pending', details: 'Waiting to start...', icon: <Icons.Key size={24} /> },
-  { name: 'Analyze', status: 'pending', details: 'Waiting for setup...', icon: <Icons.DevAI size={24} /> },
-  { name: 'Fix Issues', status: 'pending', details: 'Waiting for analysis...', icon: <Icons.Wrench size={24} /> },
-  { name: 'Deploy', status: 'pending', details: 'Waiting to start deployment...', icon: <Icons.NewDeployment size={24} /> },
-  { name: 'Complete', status: 'pending', details: 'Awaiting completion...', icon: <Icons.CheckCircle size={24} /> },
+  { name: 'Setup', status: 'pending', details: '', icon: <Icons.Key size={24} /> },
+  { name: 'Analyze', status: 'pending', details: '', icon: <Icons.DevAI size={24} /> },
+  { name: 'Fix Issues', status: 'pending', details: '', icon: <Icons.Wrench size={24} /> },
+  { name: 'Deploy', status: 'pending', details: '', icon: <Icons.NewDeployment size={24} /> },
+  { name: 'Complete', status: 'pending', details: '', icon: <Icons.CheckCircle size={24} /> },
 ];
 
 const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> = ({ step, isActive }) => {
@@ -76,6 +78,8 @@ const NewDeploymentPage: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState<boolean>(false);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState<boolean>(false);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
   const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
   const lastLogsCountRef = useRef<number>(0);
   const lastMessageRef = useRef<string | null>(null);
@@ -85,6 +89,30 @@ const NewDeploymentPage: React.FC = () => {
     
     const selectedRepoData = repos.find(repo => repo.id === selectedRepo);
     if (!selectedRepoData) return;
+
+    // Prevent duplicate deployments for same repo: attach to existing instead
+    try {
+      if (auth?.currentUser) {
+        const existing = await getDeployments(auth.currentUser.uid);
+        const match = existing.find(d => d.repoOwner === selectedRepoData.owner && d.repoName === selectedRepoData.name);
+        if (match) {
+          if (['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'].includes(match.status)) {
+            setDeploymentId(match.id);
+            setIsDeploying(true);
+            localStorage.setItem('active_deployment_id', match.id);
+            setBanner({ type: 'info', message: 'This project is already deploying. Resuming progress view.' });
+            return;
+          }
+          if (match.status === 'deployed') {
+            setDeploymentId(match.id);
+            setDeployedUrl(match.deploymentUrl || null);
+            setBanner({ type: 'info', message: 'Project is already deployed. Opening management page.' });
+            try { window.location.hash = `#/deployments?id=${match.id}`; } catch {}
+            return;
+          }
+        }
+      }
+    } catch {}
 
     setShowInstructions(false);
     setIsDeploying(true);
@@ -101,6 +129,7 @@ const NewDeploymentPage: React.FC = () => {
       const result = await startDeployment(selectedRepoData.id, selectedRepoData.owner, selectedRepoData.name);
       console.log('Deployment started successfully:', result);
       setDeploymentId(result.deploymentId);
+      try { localStorage.setItem('active_deployment_id', result.deploymentId); } catch {}
     } catch (error) {
       console.error('Failed to start deployment:', error);
       setIsDeploying(false);
@@ -116,7 +145,7 @@ const NewDeploymentPage: React.FC = () => {
       }
       
       // Show error in a more user-friendly way
-      alert(errorMessage);
+      setBanner({ type: 'error', message: errorMessage });
     }
   }, [selectedRepo, repos]);
 
@@ -155,11 +184,20 @@ const NewDeploymentPage: React.FC = () => {
     return () => {};
   }, [deploymentId]);
 
+  // Resume active deployment from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('active_deployment_id');
+      if (saved && !deploymentId) setDeploymentId(saved);
+    } catch {}
+  }, []);
+
   // Firestore listener for realtime deployment updates
   useEffect(() => {
     if (!deploymentId) return;
     const unsubscribe = watchDeployment(deploymentId, (data) => {
       if (!data) return;
+      setCurrentDeployment(data as any);
       console.log('[NewDeployment] Firestore update:', {
         status: data.status,
         message: data.message,
@@ -182,6 +220,7 @@ const NewDeploymentPage: React.FC = () => {
               msg.includes('✅') ||
               msg.includes('🔔') ||
               msg.includes('Setup complete') ||
+              msg.includes('Docker setup complete') ||
               msg.includes('Analyze complete') ||
               msg.includes('Fix Issues skipped') ||
               msg.includes('No issues found') ||
@@ -198,57 +237,43 @@ const NewDeploymentPage: React.FC = () => {
       }
       // Progress mapping
       if (typeof data.status === 'string') {
-        const phaseFor = (status: string, message: string): number => {
-          // Map backend status to frontend step index (0-4)
-          switch (status) {
-            case 'starting':
-            case 'injecting_secrets':
-              return 0; // Setup
-            case 'detecting_language':
-              // If message says "Setup complete", we're between setup and analyze
-              return message?.includes('Setup complete') ? 0 : 0;
-            case 'analyzing':
-              return 1; // Analyze
-            case 'fixing':
-              return 2; // Fix Issues
-            case 'deploying':
-              return 3; // Deploy
-            case 'deployed':
-              return 4; // Complete
-            case 'failed':
-              // Find which step failed based on message or status history
-              if (message?.includes('Setup')) return 0;
-              if (message?.includes('Analyz')) return 1;
-              if (message?.includes('Fix')) return 2;
-              if (message?.includes('Deploy')) return 3;
-              return 0;
-            default:
-              console.warn('[NewDeployment] Unknown status:', status);
-              return 0;
-          }
-        };
         const msg: string = data.message || '';
-        const target = phaseFor(data.status, msg);
-        console.log('[NewDeployment] Mapped status to phase:', { status: data.status, message: msg, targetPhase: target });
+        const lastStep = (data as any)?.lastStep ? String((data as any).lastStep).toLowerCase() : '';
+        let target: number | null = null;
+        if (lastStep) {
+          if (lastStep === 'setup' || lastStep === 'docker') target = 0;
+          else if (lastStep === 'analyze') target = 1;
+          else if (lastStep === 'fix') target = 2;
+          else if (lastStep === 'deploy') target = 3;
+        }
+        if (data.status === 'deployed') target = 4;
+        const hasTarget = target !== null;
+        if (!hasTarget) {
+          console.log('[NewDeployment] Waiting for webhook lastStep; not auto-advancing');
+        } else {
+          console.log('[NewDeployment] Mapped lastStep to phase:', { lastStep, targetPhase: target });
+        }
         
         setDeploymentSteps((prevSteps) => {
           const next = prevSteps.map(s => ({ ...s }));
           
           // Set status for each step
-          for (let i = 0; i < next.length; i++) {
-            if (i < target) {
-              next[i].status = 'success';
-            } else if (i === target) {
-              next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
-            } else {
-              next[i].status = 'pending';
+          if (hasTarget) {
+            for (let i = 0; i < next.length; i++) {
+              if (i < (target as number)) {
+                next[i].status = 'success';
+              } else if (i === (target as number)) {
+                next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
+              } else {
+                next[i].status = 'pending';
+              }
             }
           }
           
           // Handle failure state
           if (data.status === 'failed') {
             const errIdx = next.findIndex(s => s.status === 'in-progress');
-            const idx = errIdx >= 0 ? errIdx : Math.min(target, next.length - 1);
+            const idx = errIdx >= 0 ? errIdx : Math.min(typeof target === 'number' ? target : 0, next.length - 1);
             next[idx] = { ...next[idx], status: 'error', details: msg || 'Failed' };
           }
           
@@ -256,15 +281,15 @@ const NewDeploymentPage: React.FC = () => {
           // Only update details for pending or in-progress steps to avoid overwriting completed states
           
           // Step 0: Setup
-          if (msg.includes('Setup complete')) {
+          if (msg.includes('Docker setup complete')) {
+            next[0].details = 'Docker setup complete';
+          } else if (msg.includes('Docker setup')) {
+            next[0].details = 'Docker setup';
+          } else if (msg.includes('Setup complete')) {
             next[0].details = 'Setup complete';
             next[0].status = 'success';
           } else if (next[0].status === 'in-progress') {
             next[0].details = msg || 'Setting up secrets and configuration...';
-          } else if (next[0].status === 'success' && (!next[0].details || next[0].details.includes('Waiting'))) {
-            next[0].details = 'Setup complete';
-          } else if (next[0].status === 'pending' && (!next[0].details || next[0].details === initialSteps[0].details)) {
-            next[0].details = 'Waiting to start...';
           }
           
           // Step 1: Analyze
@@ -273,10 +298,6 @@ const NewDeploymentPage: React.FC = () => {
             next[1].status = 'success';
           } else if (next[1].status === 'in-progress') {
             next[1].details = msg || 'Analyzing codebase...';
-          } else if (next[1].status === 'success' && (!next[1].details || next[1].details.includes('Waiting'))) {
-            next[1].details = 'Analyze complete';
-          } else if (next[1].status === 'pending' && (!next[1].details || next[1].details === initialSteps[1].details)) {
-            next[1].details = 'Waiting for setup...';
           }
           
           // Step 2: Fix Issues
@@ -296,13 +317,6 @@ const NewDeploymentPage: React.FC = () => {
             }
           } else if (next[2].status === 'in-progress') {
             next[2].details = msg || 'Applying fixes...';
-          } else if (next[2].status === 'success' && (!next[2].details || next[2].details.includes('Waiting'))) {
-            // Use existing success details or set a default
-            if (!next[2].details || next[2].details === 'Waiting for analysis...') {
-              next[2].details = 'No issues found';
-            }
-          } else if (next[2].status === 'pending' && (!next[2].details || next[2].details === initialSteps[2].details)) {
-            next[2].details = 'Waiting for analysis...';
           }
           
           // Step 3: Deploy
@@ -311,22 +325,13 @@ const NewDeploymentPage: React.FC = () => {
             next[3].status = 'success';
           } else if (next[3].status === 'in-progress') {
             next[3].details = msg || 'Deploying to Cloud Run...';
-          } else if (next[3].status === 'success' && (!next[3].details || next[3].details.includes('Waiting'))) {
-            next[3].details = 'Deployment complete';
-          } else if (next[3].status === 'pending' && (!next[3].details || next[3].details === initialSteps[3].details)) {
-            next[3].details = 'Waiting to start deployment...';
           }
           
           // Step 4: Complete
           if (target === 4 || data.status === 'deployed') {
-            if (msg.includes('auto create ci/cd pipeline and deployed with docker using gcp') || msg.includes('completed')) {
-              next[4].details = 'Deployment completed successfully!';
-            } else {
-              next[4].details = msg || 'Deployment completed successfully!';
-            }
+            // Only set a detail if webhook provided one; otherwise leave as-is
+            next[4].details = msg || next[4].details;
             next[4].status = 'success';
-          } else if (next[4].status === 'pending') {
-            next[4].details = 'Awaiting completion...';
           }
           
           // Set current step index
@@ -349,6 +354,9 @@ const NewDeploymentPage: React.FC = () => {
       }
       
       // Update deploying state
+      if (['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'].includes(data.status as any)) {
+        setIsDeploying(true);
+      }
       if (data.status === 'deployed') {
         console.log('[NewDeployment] Deployment completed, stopping deployment state');
         setIsDeploying(false);
@@ -356,10 +364,12 @@ const NewDeploymentPage: React.FC = () => {
         if (data.deploymentUrl) {
           setDeployedUrl(data.deploymentUrl);
         }
+        try { localStorage.removeItem('active_deployment_id'); } catch {}
       }
       if (data.status === 'failed') {
         console.log('[NewDeployment] Deployment failed, stopping deployment state');
         setIsDeploying(false);
+        try { localStorage.removeItem('active_deployment_id'); } catch {}
       }
     });
     return () => { try { unsubscribe(); } catch {} };
@@ -415,10 +425,27 @@ const NewDeploymentPage: React.FC = () => {
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold text-on-background mb-2">New Deployment</h1>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
+          <h1 className="text-3xl font-bold text-on-background">New Deployment</h1>
+          <div className="mt-3 md:mt-0 flex items-center gap-2">
+            {isDeploying && deploymentId && (
+              <Button size="sm" variant="outlined" onClick={() => setShowCancelConfirm(true)}>
+                Cancel
+              </Button>
+            )}
+            {deployedUrl && (
+              <span className="text-sm text-green-700 bg-green-100 px-3 py-1 rounded-full">Your application has been successfully deployed!</span>
+            )}
+          </div>
+        </div>
+        {banner && (
+          <div className="mb-4">
+            <InlineAlert type={banner.type} message={banner.message} onClose={() => setBanner(null)} />
+          </div>
+        )}
         <p className="text-on-surface-variant mb-8 text-center md:text-left">
           {deployedUrl 
-              ? 'Your application has been successfully deployed!'
+              ? ''
               : isDeploying 
                   ? 'Your deployment is in progress...' 
                   : 'Select a repository to begin the automated deployment process.'
@@ -515,6 +542,10 @@ const NewDeploymentPage: React.FC = () => {
                               <button onClick={() => navigator.clipboard.writeText(deployedUrl)} className="text-on-surface-variant hover:text-primary">
                                   <Icons.Copy size={16} />
                               </button>
+                              {deploymentId && (
+                                <Button size="sm" variant="outlined" onClick={() => { try { window.location.hash = `#/deployments?id=${deploymentId}` } catch {} }}>Manage</Button>
+                              )}
+                              <Button size="sm" variant="filled" onClick={() => { setDeploymentId(null); setIsDeploying(false); setCurrentDeployment(null); setDeploymentSteps(initialSteps); setCurrentStepIndex(0); setDeployedUrl(null); try { localStorage.removeItem('active_deployment_id'); } catch {}; setBanner(null); }}>Start New Deployment</Button>
                           </div>
                       </div>
                   </Card>
@@ -532,7 +563,7 @@ const NewDeploymentPage: React.FC = () => {
                   const handleReauthorize = async () => {
                     try {
                       await reauthorizeWithGitHub();
-                      alert('Re-authorization successful! Please try deploying again.');
+                      setBanner({ type: 'success', message: 'Re-authorization successful! Please try deploying again.' });
                       // Reset deployment to allow retry
                       setDeploymentId(null);
                       setIsDeploying(false);
@@ -541,14 +572,14 @@ const NewDeploymentPage: React.FC = () => {
                       setCurrentStepIndex(0);
                     } catch (error) {
                       console.error('Re-authorization failed:', error);
-                      alert('Re-authorization failed. Please try again.');
+                      setBanner({ type: 'error', message: 'Re-authorization failed. Please try again.' });
                     }
                   };
 
                   const handleClearCacheAndReauth = async () => {
                     try {
                       await forceManualGitHubReauth();
-                      alert('Cache cleared! Please try deploying again.');
+                      setBanner({ type: 'success', message: 'Cache cleared! Please try deploying again.' });
                       // Reset deployment to allow retry
                       setDeploymentId(null);
                       setIsDeploying(false);
@@ -630,11 +661,7 @@ const NewDeploymentPage: React.FC = () => {
                             <h2 className="text-lg font-medium text-on-surface">Deployment Terminal</h2>
                             <p className="text-sm text-on-surface-variant">Live deployment logs and progress updates</p>
                           </div>
-                          {isDeploying && deploymentId && (
-                            <Button size="sm" variant="outlined" onClick={async () => { try { await cancelDeployment(deploymentId); } catch (e) { console.error(e); } }}>
-                              Cancel
-                            </Button>
-                          )}
+                          {/* Cancel moved to header */}
                         </div>
                       </div>
                       <div className="p-4">
@@ -649,11 +676,39 @@ const NewDeploymentPage: React.FC = () => {
                 </div>
               </div>
             )}
+            {/* Jules session iframe when available */}
+            {currentDeployment?.julesSessionUrl && (
+              <div className="mt-4">
+                <Card>
+                  <div className="p-4 border-b border-outline/30">
+                    <h2 className="text-lg font-medium text-on-surface">AI Fix Session (Jules)</h2>
+                    <p className="text-sm text-on-surface-variant">Follow along as issues are being fixed automatically.</p>
+                  </div>
+                  <div className="p-0">
+                    <iframe
+                      src={currentDeployment.julesSessionUrl}
+                      title="Jules Session"
+                      className="w-full"
+                      style={{ height: '480px', border: '0' }}
+                      allow="clipboard-write; fullscreen"
+                    />
+                  </div>
+                </Card>
+              </div>
+            )}
           </div>
         </div>
       </div>
+      <ConfirmationModal
+        isOpen={showCancelConfirm}
+        onClose={() => setShowCancelConfirm(false)}
+        onConfirm={async () => { setShowCancelConfirm(false); if (!deploymentId) return; try { await cancelDeployment(deploymentId); } catch (e) { console.error(e); } }}
+        title="Cancel Deployment"
+        message="Are you sure you want to cancel the current deployment?"
+        confirmText="Cancel Deployment"
+        confirmVariant="filled"
+      />
     </div>
   );
 };
-
 export default NewDeploymentPage;

@@ -89,12 +89,14 @@ async function ensureWorkflowEnabled(octokit, owner, repo, workflowFile) {
 // Lightweight helper to notify our webhook with progress updates
 async function notifyProgress(webhookUrl, webhookToken, payload) {
     try {
-        if (!webhookUrl || !webhookToken)
+        const cleanUrl = (webhookUrl || '').trim();
+        const cleanToken = (webhookToken || '').trim();
+        if (!cleanUrl || !cleanToken)
             return;
-        await axios_1.default.post(webhookUrl, payload, {
+        await axios_1.default.post(cleanUrl, payload, {
             headers: {
                 "Content-Type": "application/json",
-                "X-Devyntra-Token": webhookToken,
+                "X-Devyntra-Token": cleanToken,
             },
             timeout: 5000,
         });
@@ -311,36 +313,42 @@ jobs:
           WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
           DEPLOYMENT_ID: ${'${{ github.event.inputs.deployment_id }}'}
         run: |
-          PAYLOAD=$(cat <<EOF
-          {
-            "deploymentId": "$DEPLOYMENT_ID",
-            "event": "progress",
-            "step": "analyze",
-            "message": "Analyze"
-          }
-          EOF
-          )
-          if [ -n "$WEBHOOK_URL" ] && [ -n "$WEBHOOK_TOKEN" ]; then
-            curl -sS -X POST "$WEBHOOK_URL" \
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "Analyze")
+            curl -sS -X POST "$CLEAN_URL" \
               -H "Content-Type: application/json" \
-              -H "X-Devyntra-Token: $WEBHOOK_TOKEN" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
               -d "$PAYLOAD" || true
           fi
-      - name: Run Linters and Compilers
+      - name: Prepare project for build
         id: run_analysis
         run: |
           set -e
           if [ -f package.json ]; then
             npm ci || npm install
-            npx eslint . || true
-            npx tsc -v >/dev/null 2>&1 && npx tsc --noEmit || true
+            if node -e "process.exit((require('./package.json').scripts||{}).build?0:1)"; then
+              npm run build
+            else
+              echo "No build script, skipping"
+            fi
+            if [ -f tsconfig.json ]; then
+              npx tsc --noEmit || true
+            fi
           elif [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
-            pip install pylint || true
-            pylint $(git ls-files '*.py') || true
           elif [ -f go.mod ]; then
-            go vet ./... || true
+            go build ./... || true
           fi
+      - name: Validate Docker build
+        run: |
+          set -e
+          if [ ! -f Dockerfile ]; then
+            echo "Missing Dockerfile" >&2
+            exit 1
+          fi
+          docker build -t devyntra:analysis .
       - name: Notify Devyntra - Analyze complete
         if: always()
         env:
@@ -349,21 +357,18 @@ jobs:
           DEPLOYMENT_ID: ${'${{ github.event.inputs.deployment_id }}'}
           JOB_STATUS: ${'${{ job.status }}'}
         run: |
-          MESSAGE="Analysis failed"
-          if [ "$JOB_STATUS" == "success" ]; then MESSAGE="Analyze complete"; fi
-          PAYLOAD=$(cat <<EOF
-          {
-            "deploymentId": "$DEPLOYMENT_ID",
-            "event": "progress",
-            "step": "analyze",
-            "message": "$MESSAGE"
-          }
-          EOF
-          )
-          if [ -n "$WEBHOOK_URL" ] && [ -n "$WEBHOOK_TOKEN" ]; then
-            curl -sS -X POST "$WEBHOOK_URL" \
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            if [ "$JOB_STATUS" == "success" ]; then
+              STATUS_MSG="Analyze complete"
+            else
+              STATUS_MSG="Analysis failed"
+            fi
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "$STATUS_MSG")
+            curl -sS -X POST "$CLEAN_URL" \
               -H "Content-Type: application/json" \
-              -H "X-Devyntra-Token: $WEBHOOK_TOKEN" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
               -d "$PAYLOAD" || true
           fi
 `;
@@ -444,14 +449,157 @@ jobs:
           )
           
           echo "Webhook payload: $PAYLOAD"
-          
-          if [ -n "$WEBHOOK_URL" ] && [ -n "$WEBHOOK_TOKEN" ]; then
-            curl -sS -X POST "$WEBHOOK_URL" \
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ]; then
+            curl -sS -X POST "$CLEAN_URL" \
               -H "Content-Type: application/json" \
-              -H "X-Devyntra-Token: $WEBHOOK_TOKEN" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
               -d "$PAYLOAD" || true
           fi
 # End Devyntra workflow v2-sse
+`;
+}
+function autoRedeployWorkflowYml(defaultBranch, projectId, serviceName, region) {
+    return `# Generated by Devyntra • workflow=auto-redeploy • do-not-edit
+name: Auto Redeploy
+on:
+  push:
+    branches: [ "${defaultBranch}" ]
+jobs:
+  build_deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Notify Devyntra - Analyze start
+        env:
+          WEBHOOK_URL: ${'${{ secrets.DEVYNTRA_WEBHOOK_URL }}'}
+          WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
+          DEPLOYMENT_ID: ${'${{ github.run_id }}'}-${'${{ github.run_attempt }}'}
+        run: |
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "Analyze")
+            curl -sS -X POST "$CLEAN_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
+              -d "$PAYLOAD" || true
+          fi
+      - name: Prepare project for build
+        run: |
+          set -e
+          if [ -f package.json ]; then
+            npm ci || npm install
+            if node -e "process.exit((require('./package.json').scripts||{}).build?0:1)"; then
+              npm run build
+            else
+              echo "No build script, skipping"
+            fi
+            if [ -f tsconfig.json ]; then
+              npx tsc --noEmit || true
+            fi
+          elif [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          elif [ -f go.mod ]; then
+            go build ./... || true
+          fi
+      - name: Validate Docker build
+        run: |
+          set -e
+          if [ ! -f Dockerfile ]; then
+            echo "Missing Dockerfile" >&2
+            exit 1
+          fi
+          docker build -t devyntra:auto .
+      - name: Notify Devyntra - Analyze complete
+        if: always()
+        env:
+          WEBHOOK_URL: ${'${{ secrets.DEVYNTRA_WEBHOOK_URL }}'}
+          WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
+          DEPLOYMENT_ID: ${'${{ github.run_id }}'}-${'${{ github.run_attempt }}'}
+          JOB_STATUS: ${'${{ job.status }}'}
+        run: |
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            if [ "$JOB_STATUS" == "success" ]; then
+              STATUS_MSG="Analyze complete"
+            else
+              STATUS_MSG="Analysis failed"
+            fi
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "$STATUS_MSG")
+            curl -sS -X POST "$CLEAN_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
+              -d "$PAYLOAD" || true
+          fi
+      - id: 'auth'
+        if: success()
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${'${{ secrets.GCP_SA_KEY }}'}
+      - uses: 'google-github-actions/setup-gcloud@v2'
+        if: success()
+      - name: Build and Deploy with Dockerfile
+        if: success()
+        env:
+          PROJECT_ID: ${projectId}
+          REGION: ${region}
+          SERVICE: ${serviceName}
+        run: |
+          set -e
+          gcloud config set project "$PROJECT_ID"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" -q
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/$SERVICE:${'${{ github.sha }}'}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          gcloud run deploy "$SERVICE" --region="$REGION" --image="$IMAGE" --allow-unauthenticated --port=8080
+      - name: Fetch Service URL
+        if: always()
+        id: fetch_url
+        env:
+          REGION: ${region}
+          SERVICE: ${serviceName}
+        run: |
+          set -e
+          URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)' 2>/dev/null || echo "")
+          echo "SERVICE_URL=$URL" >> $GITHUB_OUTPUT
+          echo "SERVICE_URL=$URL" >> $GITHUB_ENV
+      - name: Notify Devyntra
+        if: always()
+        env:
+          WEBHOOK_URL: ${'${{ secrets.DEVYNTRA_WEBHOOK_URL }}'}
+          WEBHOOK_TOKEN: ${'${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}'}
+          DEPLOYMENT_ID: ${'${{ github.run_id }}'}-${'${{ github.run_attempt }}'}
+          SERVICE_URL: ${'${{ steps.fetch_url.outputs.SERVICE_URL }}'}
+        run: |
+          STATUS="success"
+          if [ "${'${{ job.status }}'}" != "success" ]; then STATUS="failure"; fi
+          PAYLOAD=$(cat <<EOF
+          {
+            "deploymentId": "$DEPLOYMENT_ID",
+            "status": "$STATUS",
+            "deploymentUrl": "$SERVICE_URL",
+            "message": "auto redeploy via Devyntra"
+          }
+          EOF
+          )
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ]; then
+            curl -sS -X POST "$CLEAN_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Devyntra-Token: $CLEAN_TOKEN" \
+              -d "$PAYLOAD" || true
+          fi
+# End Devyntra auto-redeploy
 `;
 }
 function defaultDockerfile() {
@@ -724,6 +872,65 @@ exports.deploy = (0, https_1.onRequest)({
             res.json({ ok: true, actionsUrl: `https://github.com/${repoOwner}/${repoName}/actions/workflows/deploy-cloudrun.yml` });
             return;
         }
+        if (req.body?.action === "set_auto_redeploy") {
+            const enable = !!req.body?.enable;
+            const deploymentIdParam = (req.body?.deploymentId ? String(req.body?.deploymentId) : '').trim();
+            const octokit = new rest_1.Octokit({ auth: githubToken });
+            const repoInfo = await octokit.repos.get({ owner: repoOwner, repo: repoName });
+            const defaultBranch = repoInfo.data.default_branch || "main";
+            const projectId = process.env.FIREBASE_CONFIG ? JSON.parse(process.env.FIREBASE_CONFIG).projectId : process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
+            const region = process.env.CLOUD_RUN_REGION || "us-central1";
+            const serviceName = `${repoName}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 30) || "web-service";
+            let webhookUrl = process.env.DEVYNTRA_WEBHOOK_URL || (projectId ? (await accessSecret(projectId, "DEVYNTRA_WEBHOOK_URL")) || "" : "");
+            if (!webhookUrl && projectId) {
+                try {
+                    const maybe = await resolveFunctionUrl(projectId, "us-central1", "deployWebhook");
+                    if (maybe)
+                        webhookUrl = maybe;
+                }
+                catch { }
+            }
+            let webhookToken = process.env.DEVYNTRA_WEBHOOK_TOKEN || (projectId ? (await accessSecret(projectId, "DEVYNTRA_WEBHOOK_TOKEN")) || "" : "");
+            if (!webhookToken && projectId) {
+                try {
+                    webhookToken = crypto.randomBytes(24).toString('hex');
+                    await ensureSecret(projectId, "DEVYNTRA_WEBHOOK_TOKEN", webhookToken);
+                }
+                catch { }
+            }
+            let gcpSaKey = process.env.GCP_SA_KEY || (projectId ? await accessSecret(projectId, "GCP_SA_KEY") : null) || undefined;
+            if (!gcpSaKey && projectId) {
+                const { keyJson } = await ensureDeployerServiceAccount(projectId, async () => { });
+                gcpSaKey = keyJson;
+            }
+            if (webhookUrl)
+                await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_URL", (webhookUrl || '').trim());
+            if (webhookToken)
+                await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_TOKEN", (webhookToken || '').trim());
+            if (gcpSaKey)
+                await upsertRepoSecret(octokit, repoOwner, repoName, "GCP_SA_KEY", gcpSaKey);
+            if (enable) {
+                await createOrUpdateFile(octokit, {
+                    owner: repoOwner,
+                    repo: repoName,
+                    path: ".github/workflows/auto-redeploy.yml",
+                    content: autoRedeployWorkflowYml(defaultBranch, projectId || "", serviceName, region),
+                    message: "chore: enable auto redeploy via Devyntra",
+                    branch: defaultBranch,
+                });
+            }
+            else {
+                await deleteFileIfExists(octokit, repoOwner, repoName, ".github/workflows/auto-redeploy.yml", defaultBranch);
+            }
+            if (deploymentIdParam) {
+                try {
+                    await db.collection("deployments").doc(deploymentIdParam).set({ autoRedeployEnabled: enable, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                }
+                catch { }
+            }
+            res.json({ ok: true, enabled: enable });
+            return;
+        }
         if (req.body?.action === "rollback") {
             const projectId = process.env.FIREBASE_CONFIG ? JSON.parse(process.env.FIREBASE_CONFIG).projectId : process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
             const region = String(req.body?.region || process.env.CLOUD_RUN_REGION || "us-central1");
@@ -862,6 +1069,13 @@ exports.deploy = (0, https_1.onRequest)({
             }
             catch { }
         }
+        // Notify frontend that setup stage has started
+        await deploymentRef.set({
+            message: 'Setup',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "setup", message: "Setup" });
+        await new Promise(r => setTimeout(r, 200));
         // Update status and notify frontend that setup (secrets injection) is complete
         await deploymentRef.set({
             status: 'detecting_language',
@@ -870,15 +1084,51 @@ exports.deploy = (0, https_1.onRequest)({
         }, { merge: true });
         await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "setup", message: "Setup complete" });
         if (webhookUrl)
-            await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_URL", webhookUrl);
-        if (webhookToken)
-            await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_TOKEN", webhookToken);
+            await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_URL", (webhookUrl || '').trim());
+        // Ensure DEVYNTRA_WEBHOOK_TOKEN in repo matches the token our deployWebhook expects
+        let expectedWebhookToken = null;
+        try {
+            expectedWebhookToken = (process.env.DEVYNTRA_WEBHOOK_TOKEN || (projectId ? await accessSecret(projectId, "DEVYNTRA_WEBHOOK_TOKEN") : null)) || null;
+        }
+        catch { }
+        const finalWebhookToken = ((webhookToken || '').trim()) || ((expectedWebhookToken || '').trim());
+        if (finalWebhookToken)
+            await upsertRepoSecret(octokit, repoOwner, repoName, "DEVYNTRA_WEBHOOK_TOKEN", finalWebhookToken);
         await upsertRepoSecret(octokit, repoOwner, repoName, "NODE_ENV", "production");
         await setStatus("detecting_language", "Detecting language and framework...");
         await addLog("🔍 Detecting language and framework...");
         const detect = await detectLanguageAndFramework(octokit, repoOwner, repoName);
         await deploymentRef.set({ language: detect.language || null, framework: detect.framework || null }, { merge: true });
         await addLog(`✅ Detected ${detect.language || 'Unknown'}${detect.framework ? ' • ' + detect.framework : ''}`);
+        // 2.5) Docker setup: ensure Dockerfile and .dockerignore exist, notify via webhooks
+        await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "docker", message: "Docker setup" });
+        try {
+            await octokit.repos.getContent({ owner: repoOwner, repo: repoName, path: "Dockerfile", ref: defaultBranch });
+        }
+        catch {
+            await createOrUpdateFile(octokit, {
+                owner: repoOwner,
+                repo: repoName,
+                path: "Dockerfile",
+                content: defaultDockerfile(),
+                message: "chore: add Dockerfile for Cloud Run via Devyntra",
+                branch: defaultBranch,
+            });
+        }
+        try {
+            await octokit.repos.getContent({ owner: repoOwner, repo: repoName, path: ".dockerignore", ref: defaultBranch });
+        }
+        catch {
+            await createOrUpdateFile(octokit, {
+                owner: repoOwner,
+                repo: repoName,
+                path: ".dockerignore",
+                content: defaultDockerignore(),
+                message: "chore: add .dockerignore via Devyntra",
+                branch: defaultBranch,
+            });
+        }
+        await notifyProgress(webhookUrl, webhookToken, { deploymentId, event: "progress", step: "docker", message: "Docker setup complete" });
         // 3) Create/Update Analysis workflow and trigger
         const analysisPath = ".github/workflows/analysis.yml";
         await createOrUpdateFile(octokit, {
@@ -1390,9 +1640,10 @@ exports.deployWebhook = (0, https_1.onRequest)({
             return;
         }
         const tokenHdr = (req.headers["x-devyntra-token"] || req.headers["X-Devyntra-Token"]);
-        const token = Array.isArray(tokenHdr) ? tokenHdr[0] : tokenHdr || "";
+        const token = ((Array.isArray(tokenHdr) ? tokenHdr[0] : tokenHdr) || "").toString().trim().replace(/^"|"$/g, "");
         const projectId = process.env.FIREBASE_CONFIG ? JSON.parse(process.env.FIREBASE_CONFIG).projectId : process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
-        const expected = process.env.DEVYNTRA_WEBHOOK_TOKEN || (projectId ? (await accessSecret(projectId, "DEVYNTRA_WEBHOOK_TOKEN")) || "" : "");
+        const expectedRaw = process.env.DEVYNTRA_WEBHOOK_TOKEN || (projectId ? (await accessSecret(projectId, "DEVYNTRA_WEBHOOK_TOKEN")) || "" : "");
+        const expected = (expectedRaw || "").toString().trim().replace(/^"|"$/g, "");
         if (expected && token !== expected) {
             res.status(401).json({ error: "Unauthorized" });
             return;
@@ -1437,6 +1688,33 @@ exports.deployWebhook = (0, https_1.onRequest)({
                 update.message = message;
             if (step)
                 update.lastStep = step;
+            // Map step to a transient status so the UI can tick steps in real time
+            try {
+                const s = String(step || '').toLowerCase();
+                if (s) {
+                    switch (s) {
+                        case 'setup':
+                            // if setup complete, move to detecting_language; else still injecting
+                            update.status = message && String(message).toLowerCase().includes('setup complete')
+                                ? 'detecting_language'
+                                : 'injecting_secrets';
+                            break;
+                        case 'docker':
+                            update.status = 'detecting_language';
+                            break;
+                        case 'analyze':
+                            update.status = 'analyzing';
+                            break;
+                        case 'fix':
+                            update.status = 'fixing';
+                            break;
+                        case 'deploy':
+                            update.status = 'deploying';
+                            break;
+                    }
+                }
+            }
+            catch { }
             await ref.set(update, { merge: true });
             if (message)
                 await ref.set({ logs: admin.firestore.FieldValue.arrayUnion(`🔔 ${message}`) }, { merge: true });

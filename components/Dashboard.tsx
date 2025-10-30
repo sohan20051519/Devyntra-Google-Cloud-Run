@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import OverviewPage from './pages/OverviewPage';
 import NewDeploymentPage from './pages/NewDeploymentPage';
@@ -8,6 +8,7 @@ import LogsPage from './pages/LogsPage';
 import SettingsPage from './pages/SettingsPage';
 import DeploymentDetailsPage from './pages/DeploymentDetailsPage';
 import { Page, Deployment } from '../types';
+import { getDeploymentById } from '../services/firestore';
 import { Icons } from './icons/Icons';
 
 interface DashboardProps {
@@ -27,12 +28,49 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
     setLogFilter(null);
   };
 
+  // Basic hash routing to support deep links and in-page navigation
+  useEffect(() => {
+    const applyRoute = async () => {
+      const hash = typeof window !== 'undefined' ? window.location.hash : '';
+      const [path, query] = hash.replace(/^#\/?/, '').split('?');
+      const params = new URLSearchParams(query || '');
+      if (path === 'deployments') {
+        const id = params.get('id');
+        if (id) {
+          const dep = await getDeploymentById(id);
+          if (dep) {
+            setSelectedDeployment(dep as any);
+            setActivePage(Page.DeploymentDetails);
+            return;
+          }
+        }
+        setSelectedDeployment(null);
+        setActivePage(Page.Deployments);
+        return;
+      }
+      if (path === 'new' || path === 'new-deployment') {
+        setSelectedDeployment(null);
+        setActivePage(Page.NewDeployment);
+        return;
+      }
+      if (path === 'overview') {
+        setSelectedDeployment(null);
+        setActivePage(Page.Overview);
+        return;
+      }
+    };
+    applyRoute();
+    const onHash = () => { applyRoute(); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   const handleBackToDeployments = () => {
     setSelectedDeployment(null);
     setActivePage(Page.Deployments);
     setLogFilter(null);
   };
-  
+
   const handleViewLogs = (deployment: Deployment) => {
     setLogFilter(deployment.repoName);
     setActivePage(Page.Logs);

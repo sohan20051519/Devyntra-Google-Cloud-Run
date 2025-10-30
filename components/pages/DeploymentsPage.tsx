@@ -3,7 +3,9 @@ import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-import { getDeployments, deleteFailedDeployments } from '../../services/firestore';
+import { getDeployments, deleteFailedDeployments, deleteInProgressDeployments } from '../../services/firestore';
+import ConfirmationModal from '../ui/ConfirmationModal';
+import InlineAlert from '../ui/InlineAlert';
 import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
 import { auth, reauthorizeWithGitHub } from '../../services/firebase';
 
@@ -59,34 +61,34 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
         </div>
       )}
       <div className="mt-4 space-y-2 text-sm">
-      <div className="flex justify-between">
-        <span className="text-on-surface-variant">Language:</span>
-        <span className="text-on-surface-variant">{deployment.language || 'Unknown'}/{deployment.framework || 'Unknown'}</span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-on-surface-variant">URL:</span>
-        {deployment.deploymentUrl ? (
-          <a href={deployment.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{deployment.deploymentUrl}</a>
-        ) : (
-          <span className="text-on-surface-variant">-</span>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">Language:</span>
+          <span className="text-on-surface-variant">{deployment.language || 'Unknown'}/{deployment.framework || 'Unknown'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">URL:</span>
+          {deployment.deploymentUrl ? (
+            <a href={deployment.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{deployment.deploymentUrl}</a>
+          ) : (
+            <span className="text-on-surface-variant">-</span>
+          )}
+        </div>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">Created:</span>
+          <span className="text-on-surface-variant">{formatTimestamp(deployment.createdAt)}</span>
+        </div>
+        {deployment.prUrl && (
+          <div className="flex justify-between">
+            <span className="text-on-surface-variant">PR:</span>
+            <a href={deployment.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#{deployment.prNumber}</a>
+          </div>
         )}
       </div>
-      <div className="flex justify-between">
-        <span className="text-on-surface-variant">Created:</span>
-        <span className="text-on-surface-variant">{formatTimestamp(deployment.createdAt)}</span>
-      </div>
-      {deployment.prUrl && (
-        <div className="flex justify-between">
-          <span className="text-on-surface-variant">PR:</span>
-          <a href={deployment.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#{deployment.prNumber}</a>
-        </div>
-      )}
-    </div>
-    <div className="mt-4 pt-4 border-t border-outline/20 flex gap-2 justify-end">
+      <div className="mt-4 pt-4 border-t border-outline/20 flex gap-2 justify-end">
         <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewDetails(deployment)}>Manage</Button>
         <Button variant="text" className="px-3 py-1 h-auto text-xs" onClick={() => onViewLogs(deployment)}>Logs</Button>
-    </div>
-  </Card>
+      </div>
+    </Card>
   );
 };
 
@@ -95,6 +97,9 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reauthorizationStatus, setReauthorizationStatus] = useState<'idle' | 'authorizing' | 'success' | 'error'>('idle');
+  const [showClearFailedModal, setShowClearFailedModal] = useState(false);
+  const [showClearInProgressModal, setShowClearInProgressModal] = useState(false);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
 
   const loadDeployments = async () => {
     if (!auth.currentUser) {
@@ -104,7 +109,16 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
     try {
       setLoading(true);
       const userDeployments = await getDeployments(auth.currentUser.uid);
-      setDeployments(userDeployments);
+      // De-duplicate by repoOwner/repoName; keep most-recent updatedAt
+      const byRepo = new Map<string, Deployment>();
+      for (const d of userDeployments) {
+        const key = `${d.repoOwner}/${d.repoName}`;
+        const prev = byRepo.get(key);
+        const dTime = (d.updatedAt as any)?.toDate?.()?.getTime?.() || 0;
+        const pTime = (prev as any)?.updatedAt?.toDate?.()?.getTime?.() || 0;
+        if (!prev || dTime >= pTime) byRepo.set(key, d);
+      }
+      setDeployments(Array.from(byRepo.values()));
     } catch (err: any) {
       console.error('Failed to load deployments:', err);
       setError(err.message || 'Failed to load deployments');
@@ -128,18 +142,13 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
 
   const handleClearFailedDeployments = async () => {
     if (!auth.currentUser) return;
-    
-    if (!confirm('Clear all failed deployments from Firebase? This will permanently delete them.')) {
-      return;
-    }
-    
     try {
       const count = await deleteFailedDeployments(auth.currentUser.uid);
-      alert(`Cleared ${count} failed deployment(s) from Firebase.`);
+      setBanner({ type: 'success', message: `Cleared ${count} failed deployment(s).` });
       await loadDeployments();
     } catch (err) {
       console.error('Failed to clear deployments:', err);
-      alert('Failed to clear deployments. Check console for details.');
+      setBanner({ type: 'error', message: 'Failed to clear deployments.' });
     }
   };
 
@@ -194,6 +203,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
   }
 
   return (
+    <>
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
         <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center mb-8">
@@ -208,9 +218,19 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                 variant="outlined" 
                 icon={<Icons.XCircle size={16}/>} 
                 className="w-full md:w-auto" 
-                onClick={handleClearFailedDeployments}
+                onClick={() => setShowClearFailedModal(true)}
               >
                 Clear Failed
+              </Button>
+            )}
+            {deployments.some(d => ['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'].includes(d.status)) && (
+              <Button 
+                variant="outlined" 
+                icon={<Icons.Spinner size={16} className="animate-spin"/>} 
+                className="w-full md:w-auto" 
+                onClick={() => setShowClearInProgressModal(true)}
+              >
+                Clear In-Progress
               </Button>
             )}
           </div>
@@ -218,6 +238,11 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
       </div>
       
       <div className="flex-1 overflow-y-auto">
+        {banner && (
+          <div className="mb-4">
+            <InlineAlert type={banner.type} message={banner.message} onClose={() => setBanner(null)} />
+          </div>
+        )}
         {deployments.length === 0 ? (
           <Card className="p-8 text-center">
             <Icons.NewDeployment size={64} className="text-on-surface-variant mx-auto mb-4" />
@@ -306,6 +331,27 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
         )}
       </div>
     </div>
+    <ConfirmationModal
+      isOpen={showClearFailedModal}
+      onClose={() => setShowClearFailedModal(false)}
+      onConfirm={async () => { setShowClearFailedModal(false); await handleClearFailedDeployments(); }}
+      title="Clear Failed Deployments"
+      message="Clear all failed deployments from Firebase? This will permanently delete them."
+      confirmText="Clear Failed"
+      confirmVariant="filled"
+      confirmClassName="bg-error text-white"
+    />
+    <ConfirmationModal
+      isOpen={showClearInProgressModal}
+      onClose={() => setShowClearInProgressModal(false)}
+      onConfirm={async () => { setShowClearInProgressModal(false); if (!auth.currentUser) return; try { const n = await deleteInProgressDeployments(auth.currentUser.uid); setBanner({ type: 'success', message: `Cleared ${n} in-progress deployment(s).` }); await loadDeployments(); } catch (e) { setBanner({ type: 'error', message: 'Failed to clear in-progress deployments.' }); } }}
+      title="Clear In-Progress Deployments"
+      message="This will remove all deployments currently marked as in-progress from the list."
+      confirmText="Clear In-Progress"
+      confirmVariant="filled"
+      confirmClassName="bg-error text-white"
+    />
+  </>
   );
 };
 
