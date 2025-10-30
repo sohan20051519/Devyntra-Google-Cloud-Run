@@ -84,6 +84,7 @@ const NewDeploymentPage: React.FC = () => {
   const lastLogsCountRef = useRef<number>(0);
   const lastMessageRef = useRef<string | null>(null);
   const highestStepIndexRef = useRef<number>(-1);
+  const isFirstUpdateRef = useRef<boolean>(true);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -124,6 +125,7 @@ const NewDeploymentPage: React.FC = () => {
     lastLogsCountRef.current = 0;
     lastMessageRef.current = null;
     highestStepIndexRef.current = -1;
+    isFirstUpdateRef.current = true;
 
     try {
       console.log('Starting deployment for:', selectedRepoData);
@@ -269,23 +271,49 @@ const NewDeploymentPage: React.FC = () => {
           return;
         }
 
-        setDeploymentSteps((prevSteps) => {
-          let next = [...prevSteps.map(s => ({ ...s }))];
-
-          // 1. Update step statuses based on the current overall deployment status
-          if (targetStepIndex !== -1) {
-            highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
-
-            for (let i = 0; i < next.length; i++) {
-              if (i < targetStepIndex) {
-                next[i].status = 'success';
-              } else if (i === targetStepIndex) {
-                next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
-              } else {
-                next[i].status = 'pending';
-              }
-            }
+        // Animate the initial steps if the first update is for a later step
+        if (isFirstUpdateRef.current && targetStepIndex > 0) {
+          isFirstUpdateRef.current = false;
+          let animatedSteps = [...initialSteps];
+          for (let i = 0; i < targetStepIndex; i++) {
+            setTimeout(() => {
+              setDeploymentSteps(prev => {
+                const newSteps = [...prev];
+                newSteps[i] = { ...newSteps[i], status: 'success' };
+                return newSteps;
+              });
+            }, i * 200); // Stagger the animation
           }
+          // After the animation, set the final state
+          setTimeout(() => {
+            setDeploymentSteps(prev => {
+                const finalSteps = [...prev];
+                for(let i = 0; i < targetStepIndex; i++) {
+                    finalSteps[i] = { ...finalSteps[i], status: 'success' };
+                }
+                finalSteps[targetStepIndex] = { ...finalSteps[targetStepIndex], status: 'in-progress' };
+                return finalSteps;
+            });
+          }, targetStepIndex * 200);
+        } else {
+            isFirstUpdateRef.current = false;
+            setDeploymentSteps((prevSteps) => {
+                let next = [...prevSteps.map(s => ({ ...s }))];
+
+                // 1. Update step statuses based on the current overall deployment status
+                if (targetStepIndex !== -1) {
+                highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
+
+                for (let i = 0; i < next.length; i++) {
+                    if (i < targetStepIndex) {
+                    next[i].status = 'success';
+                    } else if (i === targetStepIndex) {
+                    next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
+                    } else {
+                    next[i].status = 'pending';
+                    }
+                }
+                }
 
           // Handle failure state - mark the current or last active step as failed
           if (data.status === 'failed') {
