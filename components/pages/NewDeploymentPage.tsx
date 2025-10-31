@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { flushSync } from 'react-dom';
 import { Repository } from '../../types';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
@@ -27,14 +26,22 @@ interface DeploymentStep {
   icon: React.ReactNode;
 }
 
-// Consolidated 5-stage progress (details will be filled by webhook updates)
-const initialSteps: DeploymentStep[] = [
-  { name: 'Setup', status: 'pending', details: '', icon: <Icons.Key size={24} /> },
-  { name: 'Analyze', status: 'pending', details: '', icon: <Icons.DevAI size={24} /> },
-  { name: 'Fix Issues', status: 'pending', details: '', icon: <Icons.Wrench size={24} /> },
-  { name: 'Deploy', status: 'pending', details: '', icon: <Icons.NewDeployment size={24} /> },
-  { name: 'Complete', status: 'pending', details: '', icon: <Icons.CheckCircle size={24} /> },
+// Configuration for the simulated deployment steps, including their duration in milliseconds
+const deploymentStepConfig = [
+  { name: 'Setup', duration: 7000, icon: <Icons.Key size={24} /> },
+  { name: 'Analyze', duration: 60000, icon: <Icons.DevAI size={24} /> },
+  { name: 'Fix Issues', duration: 1000, icon: <Icons.Wrench size={24} /> },
+  { name: 'Deploy', duration: 76000, icon: <Icons.NewDeployment size={24} /> },
+  { name: 'Complete', duration: 1000, icon: <Icons.CheckCircle size={24} /> },
 ];
+
+// Generate the initial state for the steps from the configuration
+const initialSteps: DeploymentStep[] = deploymentStepConfig.map(step => ({
+  name: step.name,
+  status: 'pending',
+  details: '',
+  icon: step.icon,
+}));
 
 const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> = ({ step, isActive }) => {
   const getStatusClasses = () => {
@@ -82,60 +89,12 @@ const NewDeploymentPage: React.FC = () => {
   const [showCancelConfirm, setShowCancelConfirm] = useState<boolean>(false);
   const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
   const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
-  const lastLogsCountRef = useRef<number>(0);
-  const lastMessageRef = useRef<string | null>(null);
-  // Refs for robust animation
-  const lastUpdateRef = useRef<any>(null);
-  const isAnimatingRef = useRef(false);
-  const animationQueueRef = useRef<number[]>([]);
-  const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const currentAnimatedStepRef = useRef<number>(-1);
 
-  const processAnimationQueue = useCallback(() => {
-    if (isAnimatingRef.current) return;
-    if (animationQueueRef.current.length === 0) return;
+  // Refs for simulation
+  const simulationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const deploymentUrlRef = useRef<string | null>(null);
+  const hasFailedRef = useRef<boolean>(false);
 
-    isAnimatingRef.current = true;
-
-    const targetStep = Math.max(...animationQueueRef.current);
-    animationQueueRef.current = [];
-
-    if (targetStep <= currentAnimatedStepRef.current) {
-        isAnimatingRef.current = false;
-        return;
-    }
-
-    const animateNextStep = (step: number) => {
-        if (step > targetStep) {
-            isAnimatingRef.current = false;
-            if (animationQueueRef.current.length > 0) {
-                processAnimationQueue(); // Kick off next animation cycle if needed
-            }
-            return;
-        }
-
-        currentAnimatedStepRef.current = step;
-
-        setDeploymentSteps(prev => {
-            const newSteps = [...prev];
-            if (step > 0) {
-                newSteps[step - 1] = { ...newSteps[step - 1], status: 'success', details: '' };
-            }
-            const isFinalStep = step === 4;
-            newSteps[step] = {
-                ...newSteps[step],
-                status: isFinalStep ? 'success' : 'in-progress',
-                details: step === targetStep ? lastUpdateRef.current?.message || '' : 'In progress...',
-            };
-            return newSteps;
-        });
-        setCurrentStepIndex(step);
-
-        animationTimeoutRef.current = setTimeout(() => animateNextStep(step + 1), 800);
-    };
-
-    animateNextStep(currentAnimatedStepRef.current + 1);
-  }, []);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -168,21 +127,19 @@ const NewDeploymentPage: React.FC = () => {
     } catch {}
 
     setShowInstructions(false);
-    setIsDeploying(true);
-    setDeployedUrl(null);
-    setDeploymentSteps(initialSteps);
+
+    // Reset simulation state
+    setDeploymentSteps(initialSteps.map(s => ({ ...s, status: 'pending' })));
     setCurrentStepIndex(0);
+    setDeployedUrl(null);
     setTerminalLogs([]);
-    lastLogsCountRef.current = 0;
-    lastMessageRef.current = null;
-    lastUpdateRef.current = null;
-    isAnimatingRef.current = false;
-    animationQueueRef.current = [];
-    if (animationTimeoutRef.current) {
-        clearTimeout(animationTimeoutRef.current);
+    deploymentUrlRef.current = null;
+    hasFailedRef.current = false;
+    if (simulationTimeoutRef.current) {
+      clearTimeout(simulationTimeoutRef.current);
     }
-    animationTimeoutRef.current = null;
-    currentAnimatedStepRef.current = -1;
+
+    setIsDeploying(true); // This will trigger the simulation controller effect
 
     try {
       console.log('Starting deployment for:', selectedRepoData);
@@ -233,17 +190,59 @@ const NewDeploymentPage: React.FC = () => {
     }
   }, [checkTokenStatus]);
 
-  // Reset UI when a new deployment starts
+  // Simulation Controller
   useEffect(() => {
-    if (!deploymentId) return;
-    lastLogsCountRef.current = 0;
-    lastMessageRef.current = null;
-    // Reset UI for a fresh run
-    setTerminalLogs([]);
-    setDeployedUrl(null);
-    setDeploymentSteps(initialSteps.map(s => ({ ...s, status: 'pending' })));
-    return () => {};
-  }, [deploymentId]);
+    if (!isDeploying) {
+      if (simulationTimeoutRef.current) {
+        clearTimeout(simulationTimeoutRef.current);
+      }
+      return;
+    }
+
+    let currentStep = 0;
+    const runSimulationStep = () => {
+      if (hasFailedRef.current) {
+        return; // Halt simulation on failure
+      }
+
+      setDeploymentSteps(prev => {
+        const newSteps = [...prev];
+        if (currentStep > 0) {
+          newSteps[currentStep - 1] = { ...newSteps[currentStep - 1], status: 'success', details: 'Completed' };
+        }
+        newSteps[currentStep] = { ...newSteps[currentStep], status: 'in-progress', details: 'In progress...' };
+        return newSteps;
+      });
+      setCurrentStepIndex(currentStep);
+
+      const nextStep = currentStep + 1;
+      if (nextStep < deploymentStepConfig.length) {
+        simulationTimeoutRef.current = setTimeout(runSimulationStep, deploymentStepConfig[currentStep].duration);
+        currentStep = nextStep;
+      } else {
+        // Last step completed
+        simulationTimeoutRef.current = setTimeout(() => {
+          if (!hasFailedRef.current) {
+            setDeploymentSteps(prev => {
+              const newSteps = [...prev];
+              newSteps[newSteps.length - 1] = { ...newSteps[newSteps.length - 1], status: 'success', details: 'Deployment finished' };
+              return newSteps;
+            });
+            setIsDeploying(false);
+            setDeployedUrl(deploymentUrlRef.current);
+          }
+        }, deploymentStepConfig[currentStep].duration);
+      }
+    };
+
+    runSimulationStep();
+
+    return () => {
+      if (simulationTimeoutRef.current) {
+        clearTimeout(simulationTimeoutRef.current);
+      }
+    };
+  }, [isDeploying]);
 
   // Resume active deployment from localStorage on mount
   useEffect(() => {
@@ -253,117 +252,51 @@ const NewDeploymentPage: React.FC = () => {
     } catch {}
   }, []);
 
-  // Firestore listener for realtime deployment updates
+  // Firestore listener to handle failures and capture final URL
   useEffect(() => {
     if (!deploymentId) return;
+
     const unsubscribe = watchDeployment(deploymentId, (data) => {
       if (!data) return;
-      setCurrentDeployment(data as any);
-      console.log('[NewDeployment] Firestore update:', {
-        status: data.status,
-        message: data.message,
-        deploymentUrl: data.deploymentUrl,
-        logsCount: data.logs?.length || 0,
-        lastStep: data.lastStep
-      });
-      // Append logs (tail)
-      if (Array.isArray(data.logs) && data.logs.length) {
-        const newLines: string[] = data.logs.slice(-10);
-        setTerminalLogs(prev => {
-          const existing = new Set(prev.map(l => l.message));
-          const add = newLines.filter(l => !existing.has(l));
-          if (!add.length) return prev;
-          const now = new Date().toLocaleTimeString();
-          const classify = (msg: string): 'info' | 'success' | 'error' | 'warning' => {
-            if (msg.includes('❌') || /failed/i.test(msg)) return 'error';
-            if (msg.includes('⚠️') || /warn/i.test(msg)) return 'warning';
-            if (
-              msg.includes('✅') ||
-              msg.includes('🔔') ||
-              msg.includes('Setup complete') ||
-              msg.includes('Docker setup complete') ||
-              msg.includes('Analyze complete') ||
-              msg.includes('Fix Issues skipped') ||
-              msg.includes('No issues found') ||
-              msg.includes('Fix Issues complete with jules') ||
-              msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')
-            ) return 'success';
-            return 'info';
-          };
-          return [
-            ...prev,
-            ...add.map((msg, i) => ({ id: `${Date.now()}-${i}`, timestamp: now, message: msg, type: classify(msg) }))
-          ];
-        });
-      }
-      // --- New robust animation logic ---
-      const getStepIndexForStatus = (data: Deployment): number => {
-        if (!data) return -1;
-        const status = data.status;
-        if (status === 'deploying' && data.deploymentUrl) return 4;
-        switch (status) {
-            case 'starting': case 'injecting_secrets': return 0;
-            case 'detecting_language': case 'analyzing': return 1;
-            case 'fixing': return 2;
-            case 'deploying': return 3;
-            case 'deployed': return 4;
-            default: return -1;
-        }
-      };
 
-      if (data) {
-        lastUpdateRef.current = data;
-        const newTargetStep = getStepIndexForStatus(data as Deployment);
+      setCurrentDeployment(data as any); // Keep for failure message display
 
-        if (newTargetStep !== -1) {
-            animationQueueRef.current.push(newTargetStep);
-            processAnimationQueue();
-        }
+      // Capture the URL when it becomes available
+      if (data.deploymentUrl) {
+        deploymentUrlRef.current = data.deploymentUrl;
+      }
 
-        if (data.status === 'failed') {
-          if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
-          isAnimatingRef.current = false;
-          setDeploymentSteps(prev => {
-              const next = [...prev];
-              const failureIndex = currentAnimatedStepRef.current !== -1 ? currentAnimatedStepRef.current : 0;
-              if (next[failureIndex]) {
-                  next[failureIndex] = {
-                      ...next[failureIndex],
-                      status: 'error',
-                      details: data.message || 'An error occurred',
-                  };
-              }
-              return next;
-          });
-        }
-      }
-      
-      // Update deployment URL when available
-      if (typeof data.deploymentUrl === 'string' && data.deploymentUrl) {
-        console.log('[NewDeployment] Setting deployed URL:', data.deploymentUrl);
-        setDeployedUrl(data.deploymentUrl);
-      }
-      
-      // Update deploying state
-      if (['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'].includes(data.status as any)) {
-        setIsDeploying(true);
-      }
-      if (data.status === 'deployed') {
-        console.log('[NewDeployment] Deployment completed, stopping deployment state');
-        setIsDeploying(false);
-        // Ensure URL is set if available
-        if (data.deploymentUrl) {
-          setDeployedUrl(data.deploymentUrl);
-        }
-        try { localStorage.removeItem('active_deployment_id'); } catch {}
-      }
+      // Handle failure
       if (data.status === 'failed') {
-        console.log('[NewDeployment] Deployment failed, stopping deployment state');
+        hasFailedRef.current = true;
+        if (simulationTimeoutRef.current) {
+          clearTimeout(simulationTimeoutRef.current);
+        }
         setIsDeploying(false);
+
+        // Update UI to show the error on the current step
+        setDeploymentSteps(prev => {
+          const newSteps = [...prev];
+          const errorStepIndex = newSteps.findIndex(step => step.status === 'in-progress');
+          if (errorStepIndex !== -1) {
+            newSteps[errorStepIndex] = {
+              ...newSteps[errorStepIndex],
+              status: 'error',
+              details: data.message || 'Deployment failed',
+            };
+          }
+          return newSteps;
+        });
+
         try { localStorage.removeItem('active_deployment_id'); } catch {}
       }
+
+      // On success, the simulation will handle the state change
     });
-    return () => { try { unsubscribe(); } catch {} };
+
+    return () => {
+      try { unsubscribe(); } catch {}
+    };
   }, [deploymentId]);
 
   useEffect(() => {
