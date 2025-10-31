@@ -83,8 +83,10 @@ const NewDeploymentPage: React.FC = () => {
   const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
   const lastLogsCountRef = useRef<number>(0);
   const lastMessageRef = useRef<string | null>(null);
+  // Refs for robust animation
   const highestStepIndexRef = useRef<number>(-1);
-  const isFirstUpdateRef = useRef<boolean>(true);
+  const animationLockRef = useRef<boolean>(false);
+  const queuedUpdateRef = useRef<any>(null);
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -125,7 +127,8 @@ const NewDeploymentPage: React.FC = () => {
     lastLogsCountRef.current = 0;
     lastMessageRef.current = null;
     highestStepIndexRef.current = -1;
-    isFirstUpdateRef.current = true;
+    animationLockRef.current = false;
+    queuedUpdateRef.current = null;
 
     try {
       console.log('Starting deployment for:', selectedRepoData);
@@ -239,11 +242,8 @@ const NewDeploymentPage: React.FC = () => {
           ];
         });
       }
-      // Progress mapping
-      if (typeof data.status === 'string') {
-        const msg: string = data.message || '';
-
-        // New mapping logic based on status
+      // Uninterruptible, sequential animation logic
+      const processDeploymentUpdate = (data: Deployment) => {
         const getStepIndexForStatus = (status: Deployment['status']): number => {
           switch (status) {
             case 'starting':
@@ -264,121 +264,79 @@ const NewDeploymentPage: React.FC = () => {
         };
 
         const targetStepIndex = getStepIndexForStatus(data.status as Deployment['status']);
+        const msg = data.message || '';
 
-        // Prevent moving backwards
-        if (targetStepIndex < highestStepIndexRef.current) {
-          console.log(`[NewDeployment] Ignoring out-of-order status update. Current highest: ${highestStepIndexRef.current}, received: ${targetStepIndex}`);
+        // Handle failure state immediately, it overrides any animation
+        if (data.status === 'failed') {
+          animationLockRef.current = false;
+          queuedUpdateRef.current = null;
+          setDeploymentSteps(prev => {
+            const next = [...prev.map(s => ({...s}))];
+            const inProgressIndex = next.findIndex(s => s.status === 'in-progress');
+            const lastSuccessIndex = next.map(s => s.status).lastIndexOf('success');
+            const failureIndex = inProgressIndex !== -1 ? inProgressIndex : (lastSuccessIndex !== -1 ? lastSuccessIndex + 1 : 0);
+
+            if (failureIndex < next.length) {
+              next[failureIndex].status = 'error';
+              next[failureIndex].details = msg || 'An error occurred';
+            }
+            return next;
+          });
           return;
         }
 
-        // Animate the initial steps if the first update is for a later step
-        if (isFirstUpdateRef.current && targetStepIndex > 0) {
-          isFirstUpdateRef.current = false;
+        if (targetStepIndex === -1 || targetStepIndex <= highestStepIndexRef.current) {
+          return; // Ignore old or irrelevant updates
+        }
 
-          // Immediately update the highest step to prevent race conditions during animation
-          highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
-          // Animate previous steps to success
-          for (let i = 0; i < targetStepIndex; i++) {
-            setTimeout(() => {
-              setDeploymentSteps(prev => {
-                const newSteps = [...prev];
-                newSteps[i] = { ...newSteps[i], status: 'success' };
-                return newSteps;
-              });
-            }, i * 200); // Stagger the animation
+        // If animation is locked, queue the latest update and exit
+        if (animationLockRef.current) {
+          queuedUpdateRef.current = data;
+          return;
+        }
+
+        // Lock animation and start processing
+        animationLockRef.current = true;
+
+        const startStep = highestStepIndexRef.current;
+        highestStepIndexRef.current = targetStepIndex;
+
+        const animateSteps = async () => {
+          // Animate from the step *after* the previous highest, up to the new target
+          for (let i = startStep + 1; i <= targetStepIndex; i++) {
+            await new Promise(resolve => setTimeout(resolve, 350)); // Animation delay
+
+            setDeploymentSteps(prev => {
+              const newSteps = [...prev.map(s => ({...s}))];
+              // Mark previous step as success
+              if (i > 0) {
+                newSteps[i - 1].status = 'success';
+              }
+              // Mark current step as in-progress or success if it's the final one
+              const isFinalStep = (i === targetStepIndex);
+              newSteps[i].status = (isFinalStep && data.status === 'deployed') ? 'success' : 'in-progress';
+              newSteps[i].details = isFinalStep ? msg : '';
+              return newSteps;
+            });
+            setCurrentStepIndex(i);
           }
 
-          // Set the current step to in-progress after the animation
-          setTimeout(() => {
-            setDeploymentSteps(prev => {
-              const finalSteps = [...prev];
-              // Ensure all previous are success
-              for (let i = 0; i < targetStepIndex; i++) {
-                finalSteps[i] = { ...finalSteps[i], status: 'success' };
-              }
-              finalSteps[targetStepIndex] = { ...finalSteps[targetStepIndex], status: 'in-progress', details: msg };
-              setCurrentStepIndex(targetStepIndex);
-              return finalSteps;
-            });
-          }, targetStepIndex * 200);
+          // Animation for this batch is complete, unlock
+          animationLockRef.current = false;
 
-        } else {
-          // Normal update
-          isFirstUpdateRef.current = false;
-          setDeploymentSteps((prevSteps) => {
-            let next = [...prevSteps.map(s => ({ ...s }))];
+          // Check for and process a queued update
+          if (queuedUpdateRef.current) {
+            const nextUpdate = queuedUpdateRef.current;
+            queuedUpdateRef.current = null;
+            processDeploymentUpdate(nextUpdate);
+          }
+        };
 
-            // 1. Update step statuses based on the current overall deployment status
-            if (targetStepIndex !== -1) {
-              for (let i = 0; i < next.length; i++) {
-                if (i < targetStepIndex) {
-                  next[i].status = 'success';
-                } else if (i === targetStepIndex) {
-                  next[i].status = data.status === 'deployed' ? 'success' : 'in-progress';
-                } else {
-                  next[i].status = 'pending';
-                }
-              }
-            }
+        animateSteps();
+      };
 
-            // Handle failure state - mark the current or last active step as failed
-            if (data.status === 'failed') {
-              const inProgressIndex = next.findIndex(s => s.status === 'in-progress');
-              const targetFailureIndex = inProgressIndex !== -1 ? inProgressIndex : (targetStepIndex >= 0 ? targetStepIndex : prevSteps.findIndex(s => s.status !== 'success'));
-              if (targetFailureIndex !== -1) {
-                next[targetFailureIndex].status = 'error';
-                next[targetFailureIndex].details = msg || 'An error occurred';
-              }
-            }
-
-            // 2. Update details based on specific messages (from original logic)
-            // This allows for more granular feedback within a step.
-            // Step 0: Setup
-            if (msg.includes('Docker setup complete') || msg.includes('Setup complete')) {
-              next[0].details = msg;
-              next[0].status = 'success';
-            } else if (next[0].status === 'in-progress') {
-              next[0].details = msg || 'Setting up secrets and configuration...';
-            }
-            // Step 1: Analyze
-            if (msg.includes('Analyze complete')) {
-              next[1].details = msg;
-              next[1].status = 'success';
-            } else if (next[1].status === 'in-progress') {
-              next[1].details = msg || 'Analyzing codebase...';
-            }
-            // Step 2: Fix Issues
-            if (msg.includes('No issues found') || msg.includes('Fix Issues skipped') || msg.includes('Fix Issues complete')) {
-              next[2].details = msg;
-              next[2].status = 'success';
-            } else if (next[2].status === 'in-progress') {
-              next[2].details = msg || 'Applying fixes...';
-            }
-            // Step 3: Deploy
-            if (msg.includes('auto create ci/cd pipeline and deployed with docker using gcp')) {
-              next[3].details = 'Auto CI/CD pipeline deployed with Docker on GCP';
-              next[3].status = 'success';
-            } else if (next[3].status === 'in-progress') {
-              next[3].details = msg || 'Deploying to Cloud Run...';
-            }
-            // Step 4: Complete
-            if (data.status === 'deployed') {
-              next[4].details = msg || 'Deployment is live!';
-              next[4].status = 'success';
-            }
-
-            // 3. Set the active step for UI highlighting
-            const inProgIdx = next.findIndex(s => s.status === 'in-progress');
-            if (inProgIdx !== -1) {
-              setCurrentStepIndex(inProgIdx);
-            } else {
-              const lastSuccessIdx = next.map(s => s.status).lastIndexOf('success');
-              setCurrentStepIndex(lastSuccessIdx !== -1 ? lastSuccessIdx : 0);
-            }
-
-            return next;
-          });
-        }
+      if (data) {
+        processDeploymentUpdate(data as Deployment);
       }
       
       // Update deployment URL when available
