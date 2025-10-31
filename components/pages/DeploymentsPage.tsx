@@ -3,7 +3,7 @@ import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-import { getDeployments, deleteFailedDeployments, deleteInProgressDeployments } from '../../services/firestore';
+import { watchDeployments, deleteFailedDeployments, deleteInProgressDeployments } from '../../services/firestore';
 import ConfirmationModal from '../ui/ConfirmationModal';
 import InlineAlert from '../ui/InlineAlert';
 import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
@@ -101,14 +101,14 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
   const [showClearInProgressModal, setShowClearInProgressModal] = useState(false);
   const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
 
-  const loadDeployments = async () => {
+  useEffect(() => {
     if (!auth.currentUser) {
       setLoading(false);
       return;
     }
-    try {
-      setLoading(true);
-      const userDeployments = await getDeployments(auth.currentUser.uid);
+
+    setLoading(true);
+    const unsubscribe = watchDeployments(auth.currentUser.uid, (userDeployments) => {
       // De-duplicate by repoOwner/repoName; keep most-recent updatedAt
       const byRepo = new Map<string, Deployment>();
       for (const d of userDeployments) {
@@ -119,21 +119,17 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
         if (!prev || dTime >= pTime) byRepo.set(key, d);
       }
       setDeployments(Array.from(byRepo.values()));
-    } catch (err: any) {
-      console.error('Failed to load deployments:', err);
-      setError(err.message || 'Failed to load deployments');
-    } finally {
       setLoading(false);
-    }
-  };
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleReauthorize = async () => {
     setReauthorizationStatus('authorizing');
     try {
       await reauthorizeWithGitHub();
       setReauthorizationStatus('success');
-      // Refresh deployments to reflect any potential fixes
-      await loadDeployments();
     } catch (err) {
       console.error('Re-authorization failed:', err);
       setReauthorizationStatus('error');
@@ -145,16 +141,11 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
     try {
       const count = await deleteFailedDeployments(auth.currentUser.uid);
       setBanner({ type: 'success', message: `Cleared ${count} failed deployment(s).` });
-      await loadDeployments();
     } catch (err) {
       console.error('Failed to clear deployments:', err);
       setBanner({ type: 'error', message: 'Failed to clear deployments.' });
     }
   };
-
-  useEffect(() => {
-    loadDeployments();
-  }, []);
 
   if (loading) {
     return (

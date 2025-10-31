@@ -3,7 +3,7 @@ import { Repository } from '../../types';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { Icons } from '../icons/Icons';
-import { fetchUserRepos, checkRepoPermission } from '../../services/github';
+import { fetchUserRepos, checkRepoPermission, getRepoLanguages } from '../../services/github';
 import { startDeployment, watchDeployment, cancelDeployment, getDeployments } from '../../services/firestore';
 import { checkGitHubTokenStatus, signInWithGitHub, reauthorizeWithGitHub, forceManualGitHubReauth, auth } from '../../services/firebase';
 import { Deployment } from '../../types';
@@ -28,11 +28,11 @@ interface DeploymentStep {
 
 // Configuration for the simulated deployment steps, including their duration in milliseconds
 const deploymentStepConfig = [
-  { name: 'Setup', duration: 7000, icon: <Icons.Key size={24} /> },
-  { name: 'Analyze', duration: 60000, icon: <Icons.DevAI size={24} /> },
-  { name: 'Fix Issues', duration: 1000, icon: <Icons.Wrench size={24} /> },
-  { name: 'Deploy', duration: 76000, icon: <Icons.NewDeployment size={24} /> },
-  { name: 'Complete', duration: 1000, icon: <Icons.CheckCircle size={24} /> },
+  { name: 'Setup', duration: 7000, icon: <Icons.Key size={24} /> },       // 7 seconds
+  { name: 'Analyze', duration: 60000, icon: <Icons.DevAI size={24} /> },    // 1 minute
+  { name: 'Fix Issues', duration: 1000, icon: <Icons.Wrench size={24} /> },   // 1 second
+  { name: 'Deploy', duration: 76000, icon: <Icons.NewDeployment size={24} /> }, // 1 minute 16 seconds
+  { name: 'Complete', duration: 1000, icon: <Icons.CheckCircle size={24} /> }, // 1 second
 ];
 
 // Generate the initial state for the steps from the configuration
@@ -94,7 +94,19 @@ const NewDeploymentPage: React.FC = () => {
   const simulationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const deploymentUrlRef = useRef<string | null>(null);
   const hasFailedRef = useRef<boolean>(false);
+  const completionCardRef = useRef<HTMLDivElement>(null);
 
+  const addTerminalLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    setTerminalLogs(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        message,
+        type,
+      }
+    ]);
+  };
 
   const runDeployment = useCallback(async () => {
     if (!selectedRepo || !repos) return;
@@ -200,11 +212,13 @@ const NewDeploymentPage: React.FC = () => {
     }
 
     let currentStep = 0;
-    const runSimulationStep = () => {
+    const runSimulationStep = async () => {
       if (hasFailedRef.current) {
-        return; // Halt simulation on failure
+        addTerminalLog('Deployment failed!', 'error');
+        return;
       }
 
+      // Update UI for the current step
       setDeploymentSteps(prev => {
         const newSteps = [...prev];
         if (currentStep > 0) {
@@ -214,15 +228,56 @@ const NewDeploymentPage: React.FC = () => {
         return newSteps;
       });
       setCurrentStepIndex(currentStep);
+      addTerminalLog(`Starting step: ${deploymentStepConfig[currentStep].name}...`);
+
+      // --- Step-specific logic ---
+      if (deploymentStepConfig[currentStep].name === 'Setup') {
+        // Simulate sub-tasks for Setup
+        setTimeout(() => addTerminalLog('Secrets injected successfully.', 'success'), 2000);
+        setTimeout(() => addTerminalLog('Docker image created successfully.', 'success'), 4000);
+      }
+
+      if (deploymentStepConfig[currentStep].name === 'Analyze') {
+        const repoData = repos?.find(r => r.id === selectedRepo);
+        if (repoData) {
+          try {
+            const languages = await getRepoLanguages(repoData.owner, repoData.name);
+            addTerminalLog(`Detected languages: ${languages.join(', ')}`, 'info');
+          } catch (error) {
+            addTerminalLog('Could not fetch repository languages.', 'warning');
+          }
+        }
+      }
+
+      if (deploymentStepConfig[currentStep].name === 'Fix Issues') {
+        const isSuccessful = Math.random() > 0.2; // Simulate 80% success rate
+        if (isSuccessful) {
+          addTerminalLog('No issues found.', 'success');
+        } else {
+          addTerminalLog('Issues found, attempting to fix with Jules...', 'info');
+        }
+      }
+
+      if (deploymentStepConfig[currentStep].name === 'Deploy') {
+        setTimeout(() => addTerminalLog('Auto-creating CI/CD pipeline...', 'info'), 3000);
+      }
+
+      // --- End of step-specific logic ---
 
       const nextStep = currentStep + 1;
       if (nextStep < deploymentStepConfig.length) {
-        simulationTimeoutRef.current = setTimeout(runSimulationStep, deploymentStepConfig[currentStep].duration);
-        currentStep = nextStep;
+        simulationTimeoutRef.current = setTimeout(() => {
+          currentStep = nextStep;
+          runSimulationStep();
+        }, deploymentStepConfig[currentStep].duration);
       } else {
         // Last step completed
         simulationTimeoutRef.current = setTimeout(() => {
           if (!hasFailedRef.current) {
+            addTerminalLog('All steps completed!', 'success');
+            if (deploymentUrlRef.current) {
+              addTerminalLog(`Deployment URL: ${deploymentUrlRef.current}`, 'success');
+            }
             setDeploymentSteps(prev => {
               const newSteps = [...prev];
               newSteps[newSteps.length - 1] = { ...newSteps[newSteps.length - 1], status: 'success', details: 'Deployment finished' };
@@ -346,6 +401,13 @@ const NewDeploymentPage: React.FC = () => {
     }
   }, [selectedRepo, repos]);
 
+  // Auto-scroll to completion card
+  useEffect(() => {
+    if (deployedUrl && completionCardRef.current) {
+      completionCardRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [deployedUrl]);
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -454,22 +516,26 @@ const NewDeploymentPage: React.FC = () => {
 
             {/* Show progress/result if deploying or deployment is complete */}
             {(isDeploying || deployedUrl || (deploymentId && !isDeploying && !deployedUrl)) && (
-              <div className="animate-fade-in-up">
+              <div ref={completionCardRef} className="animate-fade-in-up">
                 {deployedUrl && (
                   <Card className="p-6 mb-8">
                       <div className="text-center">
                           <Icons.CheckCircle size={48} className="text-green-600 mx-auto mb-4" />
                           <h2 className="text-xl font-medium text-on-surface mb-2">Deployment Complete!</h2>
                           <p className="text-on-surface-variant mb-4">Your application is now live.</p>
-                          <div className="flex items-center justify-center p-2 rounded-lg bg-surface-variant gap-4">
-                              <a href={deployedUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{deployedUrl}</a>
+                          <div className="flex flex-col sm:flex-row items-center justify-center p-2 rounded-lg bg-surface-variant gap-4">
+                            <div className="flex items-center gap-2">
+                              <a href={deployedUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate">{deployedUrl}</a>
                               <button onClick={() => navigator.clipboard.writeText(deployedUrl)} className="text-on-surface-variant hover:text-primary">
                                   <Icons.Copy size={16} />
                               </button>
+                            </div>
+                            <div className="flex items-center gap-2">
                               {deploymentId && (
                                 <Button size="sm" variant="outlined" onClick={() => { try { window.location.hash = `#/deployments?id=${deploymentId}` } catch {} }}>Manage</Button>
                               )}
                               <Button size="sm" variant="filled" onClick={() => { setDeploymentId(null); setIsDeploying(false); setCurrentDeployment(null); setDeploymentSteps(initialSteps); setCurrentStepIndex(0); setDeployedUrl(null); try { localStorage.removeItem('active_deployment_id'); } catch {}; setBanner(null); }}>Start New Deployment</Button>
+                            </div>
                           </div>
                       </div>
                   </Card>
@@ -562,22 +628,20 @@ const NewDeploymentPage: React.FC = () => {
                   );
                 })()}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                      <div className="p-4 border-b border-outline/30">
-                          <h2 className="text-lg font-medium text-on-surface">
-                            {deployedUrl ? 'Deployment Summary' : 'Deployment Progress'}
-                          </h2>
-                      </div>
-                      <div className="p-4 space-y-2">
-                          {deploymentSteps.map((step, index) => (
-                              <DeploymentStepView key={step.name} step={step} isActive={index === currentStepIndex && isDeploying} />
-                          ))}
-                      </div>
-                  </Card>
-
-                  {/* Real-time Terminal Window */}
-                  {(isDeploying || deploymentId) && (
+                {isDeploying && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card>
+                        <div className="p-4 border-b border-outline/30">
+                            <h2 className="text-lg font-medium text-on-surface">
+                              {deployedUrl ? 'Deployment Summary' : 'Deployment Progress'}
+                            </h2>
+                        </div>
+                        <div className="p-4 space-y-2">
+                            {deploymentSteps.map((step, index) => (
+                                <DeploymentStepView key={step.name} step={step} isActive={index === currentStepIndex && isDeploying} />
+                            ))}
+                        </div>
+                    </Card>
                     <Card>
                       <div className="p-4 border-b border-outline/30">
                         <div className="flex items-center justify-between">
@@ -585,8 +649,7 @@ const NewDeploymentPage: React.FC = () => {
                             <h2 className="text-lg font-medium text-on-surface">Deployment Terminal</h2>
                             <p className="text-sm text-on-surface-variant">Live deployment logs and progress updates</p>
                           </div>
-                          {/* Cancel moved to header */}
-                        </div>
+                </div>
                       </div>
                       <div className="p-4">
                         <Terminal 
@@ -596,8 +659,8 @@ const NewDeploymentPage: React.FC = () => {
                         />
                       </div>
                     </Card>
-                  )}
-                </div>
+                  </div>
+            )}
               </div>
             )}
             {/* Jules session iframe when available */}

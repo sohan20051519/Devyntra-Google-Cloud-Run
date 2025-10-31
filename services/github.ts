@@ -57,3 +57,21 @@ export async function checkRepoPermission(owner: string, repo: string): Promise<
 
   return { isAdmin };
 }
+
+export const getRepoLanguages = async (owner: string, repo: string): Promise<string[]> => {
+  const token = localStorage.getItem('github_access_token');
+  if (!token) {
+    throw new Error('GitHub token not found');
+  }
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/languages`, {
+    headers: {
+      Authorization: `token ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch repo languages: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return Object.keys(data);
+};
