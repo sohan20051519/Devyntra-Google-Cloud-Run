@@ -274,6 +274,9 @@ const NewDeploymentPage: React.FC = () => {
         // Animate the initial steps if the first update is for a later step
         if (isFirstUpdateRef.current && targetStepIndex > 0) {
           isFirstUpdateRef.current = false;
+
+          // Immediately update the highest step to prevent race conditions during animation
+          highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
           // Animate previous steps to success
           for (let i = 0; i < targetStepIndex; i++) {
             setTimeout(() => {
@@ -307,8 +310,6 @@ const NewDeploymentPage: React.FC = () => {
 
             // 1. Update step statuses based on the current overall deployment status
             if (targetStepIndex !== -1) {
-              highestStepIndexRef.current = Math.max(highestStepIndexRef.current, targetStepIndex);
-
               for (let i = 0; i < next.length; i++) {
                 if (i < targetStepIndex) {
                   next[i].status = 'success';
