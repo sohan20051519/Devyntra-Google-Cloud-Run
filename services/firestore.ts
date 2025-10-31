@@ -306,6 +306,25 @@ export const getDeployments = async (userId: string): Promise<Deployment[]> => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Deployment));
 };
 
+export const watchDeployments = (userId: string, callback: (deployments: Deployment[]) => void): () => void => {
+  if (!userId) {
+    console.error('watchDeployments failed: userId is missing');
+    return () => {};
+  }
+  const q = query(
+    collection(db, 'deployments'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  );
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const deployments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Deployment));
+    callback(deployments);
+  });
+
+  return unsubscribe;
+};
+
 // Get deployment statistics
 export const getDeploymentStats = async (userId: string) => {
   try {
