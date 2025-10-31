@@ -244,7 +244,12 @@ const NewDeploymentPage: React.FC = () => {
       }
       // Uninterruptible, sequential animation logic
       const processDeploymentUpdate = (data: Deployment) => {
-        const getStepIndexForStatus = (status: Deployment['status']): number => {
+        const getStepIndexForStatus = (data: Deployment): number => {
+          const status = data.status;
+          // The crucial fix: only consider it "Complete" (step 4) if the status is deploying AND the URL is present.
+          if (status === 'deploying' && data.deploymentUrl) {
+            return 4; // Complete
+          }
           switch (status) {
             case 'starting':
             case 'injecting_secrets':
@@ -257,13 +262,13 @@ const NewDeploymentPage: React.FC = () => {
             case 'deploying':
               return 3; // Deploy
             case 'deployed':
-              return 4; // Complete
+              return 4; // Also Complete for safety
             default:
               return -1;
           }
         };
 
-        const targetStepIndex = getStepIndexForStatus(data.status as Deployment['status']);
+        const targetStepIndex = getStepIndexForStatus(data);
         const msg = data.message || '';
 
         // Handle failure state immediately, it overrides any animation
@@ -314,7 +319,8 @@ const NewDeploymentPage: React.FC = () => {
               }
               // Mark current step as in-progress or success if it's the final one
               const isFinalStep = (i === targetStepIndex);
-              newSteps[i].status = (isFinalStep && data.status === 'deployed') ? 'success' : 'in-progress';
+              const isTrulyComplete = (i === 4 && (data.status === 'deployed' || !!data.deploymentUrl));
+              newSteps[i].status = (isFinalStep && isTrulyComplete) ? 'success' : 'in-progress';
               newSteps[i].details = isFinalStep ? msg : '';
               return newSteps;
             });
