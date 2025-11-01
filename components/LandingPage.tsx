@@ -108,16 +108,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
           <div className="grid lg:grid-cols-2 gap-12 items-center w-full">
             <div className="text-center lg:text-left">
               <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-on-background mb-6">
-                <AnimatedText text="From" delay={100} />{' '}
-                <AnimatedText text="Code" delay={200} />{' '}
-                <AnimatedText text="to" delay={300} />{' '}
-                <AnimatedText text="Cloud," delay={400} />
-                <br />
-                <AnimatedText text="Intelligently" delay={500} className="text-primary" />{' '}
-                <AnimatedText text="Automated." delay={600} />
+                <AnimatedText text="The" delay={100} />{' '}
+                <AnimatedText text="End" delay={200} />{' '}
+                <AnimatedText text="of" delay={300} />{' '}
+                <AnimatedText text="Manual" delay={400} />{' '}
+                <AnimatedText text="DevOps." delay={500} className="text-primary" />
               </h1>
               <p className="text-base sm:text-lg md:text-xl text-on-surface-variant max-w-xl mx-auto lg:mx-0 mb-10 animate-fade-in-up" style={{ animationDelay: '700ms' }}>
-                Devyntra is the AI co-pilot for modern CI/CD. Connect your GitHub and watch as we analyze, containerize, and deploy your applications with zero configuration.
+                Stop wrestling with YAML and CI configurations. Devyntra is a zero-config platform that takes your code from repository to live Cloud Run URL in a single click.
               </p>
               <div className="animate-fade-in-up flex justify-center lg:justify-start" style={{ animationDelay: '800ms' }}>
                  <Button 
@@ -137,7 +135,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                    icon={<Icons.GitHub size={20}/>} 
                    className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright"
                  >
-                    Deploy Your First App
+                    Connect with GitHub to Start
                  </Button>
               </div>
             </div>
@@ -277,131 +275,48 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             </div>
         </section>
 
-        {/* How It Works Section */}
+        {/* Features Section */}
         <section className="py-20">
             <div className="text-center max-w-3xl mx-auto mb-16">
-                <h2 className="text-3xl md:text-4xl font-bold text-on-background mb-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>A Radically Simple Workflow</h2>
+                <h2 className="text-3xl md:text-4xl font-bold text-on-background mb-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>Built for Developers, by Developers</h2>
                 <p className="text-lg text-on-surface-variant animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-                    Focus on your code, not on configuration. We've simplified the entire CI/CD process down to three easy steps.
+                    Devyntra is packed with features that eliminate the tedious parts of deployment, letting you focus on what you do best: building incredible software.
                 </p>
             </div>
 
             <div className="grid md:grid-cols-3 gap-8">
-              {/* Step 1 */}
+              {/* Feature 1 */}
               <div className="animate-fade-in-up" style={{ animationDelay: '300ms' }}>
                 <Card className="p-8 text-center h-full">
                   <div className="inline-block p-4 bg-primary-container rounded-full text-primary mb-4">
-                    <Icons.GitHub size={32} />
+                    <Icons.NewDeployment size={32} />
                   </div>
-                  <h3 className="text-xl font-bold text-on-primary-container mb-2">1. Connect Repository</h3>
-                  <p className="text-on-surface-variant">Grant Devyntra access to your GitHub repository with a single click. No setup files needed.</p>
+                  <h3 className="text-xl font-bold text-on-primary-container mb-2">One-Click Deployment</h3>
+                  <p className="text-on-surface-variant">Go from a GitHub repository to a live Google Cloud Run URL in a single click. No YAML, no manual steps.</p>
                 </Card>
               </div>
 
-              {/* Step 2 */}
+              {/* Feature 2 */}
               <div className="animate-fade-in-up" style={{ animationDelay: '400ms' }}>
                 <Card className="p-8 text-center h-full border-2 border-primary shadow-lg">
                   <div className="inline-block p-4 bg-primary-container rounded-full text-primary mb-4">
                     <Icons.DevAI size={32} />
                   </div>
-                  <h3 className="text-xl font-bold text-on-primary-container mb-2">2. AI Analyzes & Builds</h3>
-                  <p className="text-on-surface-variant">Our AI scans your code, fixes errors, installs dependencies, and containerizes your application.</p>
+                  <h3 className="text-xl font-bold text-on-primary-container mb-2">AI-Powered Code Analysis & Fixes</h3>
+                  <p className="text-on-surface-variant">Our AI assistant, Jules, scans your code for errors, applies fixes, and ensures your app is production-ready before deployment.</p>
                 </Card>
               </div>
 
-              {/* Step 3 */}
+              {/* Feature 3 */}
               <div className="animate-fade-in-up" style={{ animationDelay: '500ms' }}>
                 <Card className="p-8 text-center h-full">
                   <div className="inline-block p-4 bg-primary-container rounded-full text-primary mb-4">
-                    <Icons.NewDeployment size={32} />
+                    <Icons.GitHub size={32} />
                   </div>
-                  <h3 className="text-xl font-bold text-on-primary-container mb-2">3. Go Live</h3>
-                  <p className="text-on-surface-variant">We generate a CI/CD pipeline and deploy your application to Google Cloud Run, giving you a live URL.</p>
+                  <h3 className="text-xl font-bold text-on-primary-container mb-2">Automated CI/CD & Secret Management</h3>
+                  <p className="text-on-surface-variant">Devyntra automatically generates a complete CI/CD pipeline and securely injects any required secrets. Zero configuration required.</p>
                 </Card>
               </div>
-            </div>
-        </section>
-
-        {/* Features Section */}
-        <section className="py-20">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-                <div className="space-y-4">
-                    <h2 className="text-3xl md:text-4xl font-bold text-on-background animate-fade-in-up" style={{ animationDelay: '100ms' }}>Your Intelligent Co-pilot</h2>
-                    <p className="text-lg text-on-surface-variant animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-                        Devyntra goes beyond simple automation. We provide a suite of intelligent tools to streamline every part of your development lifecycle.
-                    </p>
-                    <ul className="space-y-6 pt-4">
-                        <li className="flex items-start gap-4 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
-                            <Icons.CheckCircle size={24} className="text-primary mt-1 flex-shrink-0" />
-                            <div>
-                                <h4 className="font-semibold text-on-surface">Automatic Language & Framework Detection</h4>
-                                <p className="text-on-surface-variant">No need to specify your stack. We analyze your repo and know exactly what to do.</p>
-                            </div>
-                        </li>
-                        <li className="flex items-start gap-4 animate-fade-in-up" style={{ animationDelay: '400ms' }}>
-                            <Icons.CheckCircle size={24} className="text-primary mt-1 flex-shrink-0" />
-                            <div>
-                                <h4 className="font-semibold text-on-surface">Autonomous Error Correction</h4>
-                                <p className="text-on-surface-variant">Our DevAI finds and fixes common bugs, pushing clean, production-ready code back to your branch.</p>
-                            </div>
-                        </li>
-                        <li className="flex items-start gap-4 animate-fade-in-up" style={{ animationDelay: '500ms' }}>
-                            <Icons.CheckCircle size={24} className="text-primary mt-1 flex-shrink-0" />
-                            <div>
-                                <h4 className="font-semibold text-on-surface">Optimized Docker Images</h4>
-                                <p className="text-on-surface-variant">We create efficient, secure container images for your application without you writing a single line of Dockerfile.</p>
-                            </div>
-                        </li>
-                    </ul>
-                </div>
-                <div className="hidden md:block animate-zoom-in" style={{ animationDelay: '300ms' }}>
-                    <Card className="p-8 aspect-square flex flex-col justify-center bg-primary-container/30">
-                        <div className="space-y-3">
-                            {/* Step 1 */}
-                            <div className="flex items-center gap-4 animate-fade-in-right" style={{ animationDelay: '400ms' }}>
-                                <div className="p-3 bg-primary/20 rounded-full text-primary flex-shrink-0">
-                                    <Icons.Code size={24} />
-                                </div>
-                                <div>
-                                    <h4 className="font-semibold text-on-primary-container">Code Ingested</h4>
-                                    <p className="text-sm text-on-surface-variant">Repository scanned</p>
-                                </div>
-                            </div>
-
-                            {/* Connector */}
-                            <div className="pl-5">
-                                <div className="h-5 w-px bg-primary/50 ml-px"></div>
-                            </div>
-
-                            {/* Step 2 */}
-                            <div className="flex items-center gap-4 animate-fade-in-right" style={{ animationDelay: '600ms' }}>
-                                <div className="p-3 bg-primary/20 rounded-full text-primary flex-shrink-0">
-                                    <Icons.DevAI size={24} />
-                                </div>
-                                <div>
-                                    <h4 className="font-semibold text-on-primary-container">AI Analysis & Fixes</h4>
-                                    <p className="text-sm text-on-surface-variant">Errors corrected</p>
-                                </div>
-                            </div>
-                            
-                            {/* Connector */}
-                            <div className="pl-5">
-                                <div className="h-5 w-px bg-primary/50 ml-px"></div>
-                            </div>
-
-                            {/* Step 3 */}
-                            <div className="flex items-center gap-4 animate-fade-in-right" style={{ animationDelay: '800ms' }}>
-                                <div className="p-3 bg-primary/20 rounded-full text-primary flex-shrink-0">
-                                    <Icons.NewDeployment size={24} />
-                                </div>
-                                <div>
-                                    <h4 className="font-semibold text-on-primary-container">Cloud Deployment</h4>
-                                    <p className="text-sm text-on-surface-variant">Live on Google Cloud</p>
-                                </div>
-                            </div>
-                        </div>
-                    </Card>
-                </div>
             </div>
         </section>
 
@@ -430,7 +345,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                     icon={<Icons.GitHub size={20}/>} 
                     className="py-4 px-8 text-base shadow-lg hover:shadow-primary/30 animate-pulse-bright"
                   >
-                      Connect GitHub & Deploy for Free
+                      Connect with GitHub to Start
                   </Button>
               </div>
           </div>
