@@ -126,6 +126,7 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
     };
 
     const isAutoInProgress = autoRedeployEnabled && (liveStatus === 'analyzing' || liveStatus === 'fixing' || liveStatus === 'deploying');
+    const displayStatus = liveUrl && liveStatus !== 'failed' ? 'deployed' : (liveStatus || deployment.status);
 
     return (
       <div className="flex flex-col h-full animate-fade-in-up">
@@ -139,7 +140,7 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                         </Button>
                         <div className="flex items-center gap-4">
                             <h1 className="text-3xl font-bold text-on-background">{deployment.repoName}</h1>
-                            <StatusBadge status={liveStatus || deployment.status}/>
+                            <StatusBadge status={displayStatus}/>
                             {isAutoInProgress && (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-primary-container text-on-primary-container">
                                 <Icons.Spinner size={12} className="animate-spin" /> Auto redeploying…
@@ -209,7 +210,7 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
                           <div className="divide-y divide-outline/20">
                               <InfoItem icon={<Globe size={16}/>} label="Live URL" value={liveUrl ? <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{liveUrl}</a> : '-'} />
                               <InfoItem icon={<GitBranch size={16}/>} label="Service" value={serviceName} />
-                              <InfoItem icon={<Icons.Deployments size={16}/>} label="Status" value={(liveStatus || deployment.status) + (liveSubstep ? ` • ${liveSubstep}` : '')} />
+                              <InfoItem icon={<Icons.Deployments size={16}/>} label="Status" value={displayStatus + (liveSubstep ? ` • ${liveSubstep}` : '')} />
                               {liveMessage && (
                                 <div className="text-sm text-on-surface-variant mt-2">{liveMessage}</div>
                               )}
