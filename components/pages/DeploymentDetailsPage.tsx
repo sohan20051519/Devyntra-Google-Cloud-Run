@@ -28,7 +28,7 @@ const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string |
     </div>
 )
 
-const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; onViewLogs: (deployment: Deployment) => void; }> = ({ deployment, onBack, onViewLogs }) => {
+const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => void; onViewLogs: (deployment: Deployment) => void; onRedeploy: (deploymentId: string) => void; }> = ({ deployment, onBack, onViewLogs, onRedeploy }) => {
     const [busy, setBusy] = useState<'idle' | 'redeploy' | 'rollback' | 'delete' | 'auto'>('idle');
     const [liveStatus, setLiveStatus] = useState<Deployment['status'] | undefined>(deployment.status);
     const [liveMessage, setLiveMessage] = useState<string | undefined>(undefined);
@@ -69,8 +69,8 @@ const DeploymentDetailsPage: React.FC<{ deployment: Deployment; onBack: () => vo
     const handleRedeploy = async () => {
       try {
         setBusy('redeploy');
-        const res = await redeploy(deployment.repoOwner, deployment.repoName);
-        window.open(res.actionsUrl || actionsUrl, '_blank');
+        await redeploy(deployment.repoOwner, deployment.repoName);
+        onRedeploy(deployment.id);
       } catch (e:any) {
         setBanner({ type: 'error', message: `Redeploy failed: ${e?.message || e}` });
       } finally {
