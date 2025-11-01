@@ -112,12 +112,14 @@ const RedeploymentAnimation: React.FC<{ deployment: Deployment }> = ({ deploymen
     };
   }, [deployment.id]);
 
+  const currentStep = deploymentSteps[currentStepIndex];
+
+  if (!currentStep) {
+    return null;
+  }
+
   return (
-    <div className="space-y-2">
-      {deploymentSteps.map((step, index) => (
-        <DeploymentStepView key={step.name} step={step} isActive={index === currentStepIndex} />
-      ))}
-    </div>
+    <DeploymentStepView step={currentStep} isActive={true} />
   );
 };
 
