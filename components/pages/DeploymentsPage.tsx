@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { DeploymentStepView, deploymentStepConfig, DeploymentStep } from './NewDeploymentPage';
+import React, { useState, useEffect, useRef } from 'react';
 import { Deployment } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Icons } from '../icons/Icons';
-import { watchDeployments, deleteFailedDeployments, deleteInProgressDeployments } from '../../services/firestore';
+import { watchDeployments, deleteFailedDeployments, deleteInProgressDeployments, watchDeployment } from '../../services/firestore';
 import ConfirmationModal from '../ui/ConfirmationModal';
 import InlineAlert from '../ui/InlineAlert';
 import { formatDeploymentStatus, formatTimestamp } from '../../services/utils';
@@ -13,7 +14,112 @@ interface DeploymentsPageProps {
   onViewDetails: (deployment: Deployment) => void;
   onNewDeployment: () => void;
   onViewLogs: (deployment: Deployment) => void;
+  redeployingId: string | null;
 }
+
+const initialSteps: DeploymentStep[] = deploymentStepConfig.map(step => ({
+  name: step.name,
+  status: 'pending',
+  details: '',
+  icon: step.icon,
+}));
+
+const RedeploymentAnimation: React.FC<{ deployment: Deployment }> = ({ deployment }) => {
+  const [deploymentSteps, setDeploymentSteps] = useState<DeploymentStep[]>(initialSteps);
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const simulationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const deploymentUrlRef = useRef<string | null>(null);
+  const hasFailedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    let currentStep = 0;
+    const runSimulationStep = async () => {
+      if (hasFailedRef.current) {
+        return;
+      }
+
+      setDeploymentSteps(prev => {
+        const newSteps = [...prev];
+        if (currentStep > 0) {
+          newSteps[currentStep - 1] = { ...newSteps[currentStep - 1], status: 'success', details: 'Completed' };
+        }
+        newSteps[currentStep] = { ...newSteps[currentStep], status: 'in-progress', details: 'In progress...' };
+        return newSteps;
+      });
+      setCurrentStepIndex(currentStep);
+
+      const nextStep = currentStep + 1;
+      if (nextStep < deploymentStepConfig.length) {
+        simulationTimeoutRef.current = setTimeout(() => {
+          currentStep = nextStep;
+          runSimulationStep();
+        }, deploymentStepConfig[currentStep].duration);
+      } else {
+        simulationTimeoutRef.current = setTimeout(() => {
+          if (!hasFailedRef.current) {
+            setDeploymentSteps(prev => {
+              const newSteps = [...prev];
+              newSteps[newSteps.length - 1] = { ...newSteps[newSteps.length - 1], status: 'success', details: 'Deployment finished' };
+              return newSteps;
+            });
+          }
+        }, deploymentStepConfig[currentStep].duration);
+      }
+    };
+
+    runSimulationStep();
+
+    return () => {
+      if (simulationTimeoutRef.current) {
+        clearTimeout(simulationTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!deployment.id) return;
+
+    const unsubscribe = watchDeployment(deployment.id, (data) => {
+      if (!data) return;
+
+      if (data.deploymentUrl) {
+        deploymentUrlRef.current = data.deploymentUrl;
+      }
+
+      if (data.status === 'failed') {
+        hasFailedRef.current = true;
+        if (simulationTimeoutRef.current) {
+          clearTimeout(simulationTimeoutRef.current);
+        }
+
+        setDeploymentSteps(prev => {
+          const newSteps = [...prev];
+          const errorStepIndex = newSteps.findIndex(step => step.status === 'in-progress');
+          if (errorStepIndex !== -1) {
+            newSteps[errorStepIndex] = {
+              ...newSteps[errorStepIndex],
+              status: 'error',
+              details: data.message || 'Deployment failed',
+            };
+          }
+          return newSteps;
+        });
+      }
+    });
+
+    return () => {
+      try { unsubscribe(); } catch {}
+    };
+  }, [deployment.id]);
+
+  return (
+    <div className="space-y-2">
+      {deploymentSteps.map((step, index) => (
+        <DeploymentStepView key={step.name} step={step} isActive={index === currentStepIndex} />
+      ))}
+    </div>
+  );
+};
 
 const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => {
   const baseClasses = 'px-3 py-1 text-xs font-medium rounded-full inline-flex items-center gap-1.5';
@@ -32,7 +138,7 @@ const StatusBadge: React.FC<{ status: Deployment['status'] }> = ({ status }) => 
   }
 };
 
-const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; onReauthorize: () => void; }> = ({ deployment, onViewDetails, onViewLogs, onReauthorize }) => {
+const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deployment: Deployment) => void; onViewLogs: (deployment: Deployment) => void; onReauthorize: () => void; isRedeploying: boolean; }> = ({ deployment, onViewDetails, onViewLogs, onReauthorize, isRedeploying }) => {
   const needsReauthorization = deployment.status === 'failed' && (
     deployment.statusReason?.includes('Failed to automatically setup GitHub secrets') ||
     deployment.statusReason?.includes('Organization approval required') ||
@@ -40,12 +146,19 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
     deployment.statusReason?.includes('requires approval')
   );
 
+  const displayStatus = deployment.deploymentUrl && deployment.status !== 'failed' ? 'deployed' : deployment.status;
+
   return (
     <Card className="mb-4">
       <div className="flex justify-between items-start">
         <span className="font-medium text-on-surface">{deployment.repoName}</span>
-        <StatusBadge status={deployment.status} />
+        {isRedeploying ? null : <StatusBadge status={displayStatus} />}
       </div>
+      {isRedeploying && (
+        <div className="mt-4">
+          <RedeploymentAnimation deployment={deployment} />
+        </div>
+      )}
       {needsReauthorization && (
         <div className="mt-2 text-xs text-red-700 p-2 bg-red-50 rounded-md">
           <strong>Permission Issue:</strong> {deployment.statusReason || 'Could not set up GitHub secrets. You may need to grant access to your repository or organization.'}
@@ -92,7 +205,7 @@ const DeploymentCard: React.FC<{ deployment: Deployment; onViewDetails: (deploym
   );
 };
 
-const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs }) => {
+const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewDeployment, onViewLogs, redeployingId }) => {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -257,7 +370,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
 
             {/* Mobile View: List of Cards */}
             <div className="md:hidden">
-              {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} onReauthorize={handleReauthorize} />)}
+              {deployments.map(dep => <DeploymentCard key={dep.id} deployment={dep} onViewDetails={onViewDetails} onViewLogs={onViewLogs} onReauthorize={handleReauthorize} isRedeploying={dep.id === redeployingId} />)}
             </div>
 
             {/* Desktop View: Table */}
@@ -281,14 +394,22 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
                       dep.statusReason?.includes('Repository permissions denied') ||
                       dep.statusReason?.includes('requires approval')
                     );
+                    const displayStatus = dep.deploymentUrl && dep.status !== 'failed' ? 'deployed' : dep.status;
+                    const isRedeploying = dep.id === redeployingId;
                     return (
                       <tr key={dep.id} className="border-b border-outline/20 last:border-b-0 hover:bg-surface-variant/30">
                         <td className="p-4 font-medium text-on-surface">{dep.repoName}</td>
                         <td className="p-4 text-on-surface-variant">{dep.language || 'Unknown'}/{dep.framework || 'Unknown'}</td>
                         <td className="p-4">
-                          <StatusBadge status={dep.status} />
-                          {needsReauthorization && (
-                            <p className="mt-1 text-xs text-red-700">Permission issue</p>
+                          {isRedeploying ? (
+                            <RedeploymentAnimation deployment={dep} />
+                          ) : (
+                            <>
+                              <StatusBadge status={displayStatus} />
+                              {needsReauthorization && (
+                                <p className="mt-1 text-xs text-red-700">Permission issue</p>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="p-4">
@@ -335,7 +456,7 @@ const DeploymentsPage: React.FC<DeploymentsPageProps> = ({ onViewDetails, onNewD
     <ConfirmationModal
       isOpen={showClearInProgressModal}
       onClose={() => setShowClearInProgressModal(false)}
-      onConfirm={async () => { setShowClearInProgressModal(false); if (!auth.currentUser) return; try { const n = await deleteInProgressDeployments(auth.currentUser.uid); setBanner({ type: 'success', message: `Cleared ${n} in-progress deployment(s).` }); await loadDeployments(); } catch (e) { setBanner({ type: 'error', message: 'Failed to clear in-progress deployments.' }); } }}
+      onConfirm={async () => { setShowClearInProgressModal(false); if (!auth.currentUser) return; try { const n = await deleteInProgressDeployments(auth.currentUser.uid); setBanner({ type: 'success', message: `Cleared ${n} in-progress deployment(s).` }); } catch (e) { setBanner({ type: 'error', message: 'Failed to clear in-progress deployments.' }); } }}
       title="Clear In-Progress Deployments"
       message="This will remove all deployments currently marked as in-progress from the list."
       confirmText="Clear In-Progress"

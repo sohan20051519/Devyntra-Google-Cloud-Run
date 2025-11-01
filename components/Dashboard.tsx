@@ -21,6 +21,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [logFilter, setLogFilter] = useState<string | null>(null);
+  const [redeployingId, setRedeployingId] = useState<string | null>(null);
 
   const handleViewDeploymentDetails = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
@@ -71,6 +72,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
     setLogFilter(null);
   };
 
+  const handleRedeploy = (deploymentId: string) => {
+    setRedeployingId(deploymentId);
+    handleBackToDeployments();
+  };
+
   const handleViewLogs = (deployment: Deployment) => {
     setLogFilter(deployment.repoName);
     setActivePage(Page.Logs);
@@ -93,7 +99,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
         return <DeploymentsPage 
           onViewDetails={handleViewDeploymentDetails} 
           onNewDeployment={() => handleGoToPage(Page.NewDeployment)}
-          onViewLogs={handleViewLogs} 
+          onViewLogs={handleViewLogs}
+          redeployingId={redeployingId}
         />;
       case Page.DeploymentDetails:
         return selectedDeployment 
@@ -101,6 +108,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProp }) => {
               deployment={selectedDeployment} 
               onBack={handleBackToDeployments}
               onViewLogs={handleViewLogs}
+              onRedeploy={handleRedeploy}
             /> 
           : <DeploymentsPage 
               onViewDetails={handleViewDeploymentDetails} 

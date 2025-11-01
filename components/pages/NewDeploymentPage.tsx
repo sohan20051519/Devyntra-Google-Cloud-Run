@@ -19,7 +19,7 @@ const mockRepos: Repository[] = [
 
 type DeploymentStepStatus = 'pending' | 'in-progress' | 'success' | 'error';
 
-interface DeploymentStep {
+export interface DeploymentStep {
   name: string;
   status: DeploymentStepStatus;
   details: string;
@@ -27,7 +27,7 @@ interface DeploymentStep {
 }
 
 // Configuration for the simulated deployment steps, including their duration in milliseconds
-const deploymentStepConfig = [
+export const deploymentStepConfig = [
   { name: 'Setup', duration: 7000, icon: <Icons.Key size={24} /> },       // 7 seconds
   { name: 'Analyze', duration: 60000, icon: <Icons.DevAI size={24} /> },    // 1 minute
   { name: 'Fix Issues', duration: 1000, icon: <Icons.Wrench size={24} /> },   // 1 second
@@ -43,7 +43,7 @@ const initialSteps: DeploymentStep[] = deploymentStepConfig.map(step => ({
   icon: step.icon,
 }));
 
-const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> = ({ step, isActive }) => {
+export const DeploymentStepView: React.FC<{ step: DeploymentStep; isActive: boolean }> = ({ step, isActive }) => {
   const getStatusClasses = () => {
     switch(step.status) {
       case 'in-progress': return 'text-primary animate-pulse';
@@ -89,6 +89,8 @@ const NewDeploymentPage: React.FC = () => {
   const [showCancelConfirm, setShowCancelConfirm] = useState<boolean>(false);
   const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
   const [terminalLogs, setTerminalLogs] = useState<Array<{id: string, timestamp: string, message: string, type: 'info' | 'success' | 'error' | 'warning'}>>([]);
+  const [isAlreadyDeployed, setIsAlreadyDeployed] = useState<boolean>(false);
+  const [existingDeploymentId, setExistingDeploymentId] = useState<string | null>(null);
 
   // Refs for simulation
   const simulationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -113,30 +115,6 @@ const NewDeploymentPage: React.FC = () => {
     
     const selectedRepoData = repos.find(repo => repo.id === selectedRepo);
     if (!selectedRepoData) return;
-
-    // Prevent duplicate deployments for same repo: attach to existing instead
-    try {
-      if (auth?.currentUser) {
-        const existing = await getDeployments(auth.currentUser.uid);
-        const match = existing.find(d => d.repoOwner === selectedRepoData.owner && d.repoName === selectedRepoData.name);
-        if (match) {
-          if (['starting','injecting_secrets','detecting_language','analyzing','fixing','deploying'].includes(match.status)) {
-            setDeploymentId(match.id);
-            setIsDeploying(true);
-            localStorage.setItem('active_deployment_id', match.id);
-            setBanner({ type: 'info', message: 'This project is already deploying. Resuming progress view.' });
-            return;
-          }
-          if (match.status === 'deployed') {
-            setDeploymentId(match.id);
-            setDeployedUrl(match.deploymentUrl || null);
-            setBanner({ type: 'info', message: 'Project is already deployed. Opening management page.' });
-            try { window.location.hash = `#/deployments?id=${match.id}`; } catch {}
-            return;
-          }
-        }
-      }
-    } catch {}
 
     setShowInstructions(false);
 
@@ -408,6 +386,39 @@ const NewDeploymentPage: React.FC = () => {
     }
   }, [deployedUrl]);
 
+  // Check if the selected repo is already deployed
+  useEffect(() => {
+    const checkDeploymentStatus = async () => {
+      if (!selectedRepo || !repos || !auth.currentUser) return;
+
+      const repoData = repos.find(r => r.id === selectedRepo);
+      if (!repoData) return;
+
+      try {
+        const existingDeployments = await getDeployments(auth.currentUser.uid);
+        const successfulDeployment = existingDeployments.find(d =>
+          d.repoOwner === repoData.owner &&
+          d.repoName === repoData.name &&
+          d.status === 'deployed'
+        );
+
+        if (successfulDeployment) {
+          setIsAlreadyDeployed(true);
+          setExistingDeploymentId(successfulDeployment.id);
+        } else {
+          setIsAlreadyDeployed(false);
+          setExistingDeploymentId(null);
+        }
+      } catch (error) {
+        console.error('Error checking for existing deployments:', error);
+        setIsAlreadyDeployed(false);
+        setExistingDeploymentId(null);
+      }
+    };
+
+    checkDeploymentStatus();
+  }, [selectedRepo, repos]);
+
   return (
     <div className="flex flex-col h-full animate-fade-in-up">
       <div className="flex-shrink-0">
@@ -490,9 +501,23 @@ const NewDeploymentPage: React.FC = () => {
                   ) : (
                     <div className="p-4 text-center">No repositories found. Connect a GitHub account or check permissions.</div>
                   )}
-                  <Button onClick={runDeployment} className="w-full mt-6" disabled={!isAdmin || isCheckingAdmin}>
-                    {isCheckingAdmin ? 'Checking permissions...' : 'Deploy Now'}
-                  </Button>
+
+                  {isAlreadyDeployed ? (
+                    <div className="mt-6 text-center">
+                      <p className="text-on-surface-variant mb-4">This repository has already been successfully deployed.</p>
+                      <Button
+                        onClick={() => { if (existingDeploymentId) { try { window.location.hash = `#/deployments?id=${existingDeploymentId}`; } catch {} } }}
+                        className="w-full"
+                        variant="outlined"
+                      >
+                        Manage Existing Deployment
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button onClick={runDeployment} className="w-full mt-6" disabled={!isAdmin || isCheckingAdmin}>
+                      {isCheckingAdmin ? 'Checking permissions...' : 'Deploy Now'}
+                    </Button>
+                  )}
 
                   {!isCheckingAdmin && !isAdmin && repos && repos.length > 0 && (
                     <div className="mt-4 p-3 rounded-lg bg-error-container/20 text-on-error-container text-sm">
