@@ -1,0 +1,73 @@
+name: Analyze Codebase
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: 'Devyntra deployment id'
+        required: false
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Notify Devyntra - Analyze start
+        env:
+          WEBHOOK_URL: ${{ secrets.DEVYNTRA_WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}
+          DEPLOYMENT_ID: ${{ github.event.inputs.deployment_id }}
+        run: |
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "Analyze")
+            curl -sS -X POST "$CLEAN_URL"               -H "Content-Type: application/json"               -H "X-Devyntra-Token: $CLEAN_TOKEN"               -d "$PAYLOAD" || true
+          fi
+      - name: Prepare project for build
+        id: run_analysis
+        run: |
+          set -e
+          if [ -f package.json ]; then
+            npm ci || npm install
+            if node -e "process.exit((require('./package.json').scripts||{}).build?0:1)"; then
+              npm run build
+            else
+              echo "No build script, skipping"
+            fi
+            if [ -f tsconfig.json ]; then
+              npx tsc --noEmit || true
+            fi
+          elif [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          elif [ -f go.mod ]; then
+            go build ./... || true
+          fi
+      - name: Validate Docker build
+        run: |
+          set -e
+          if [ ! -f Dockerfile ]; then
+            echo "Missing Dockerfile" >&2
+            exit 1
+          fi
+          docker build -t devyntra:analysis .
+      - name: Notify Devyntra - Analyze complete
+        if: always()
+        env:
+          WEBHOOK_URL: ${{ secrets.DEVYNTRA_WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.DEVYNTRA_WEBHOOK_TOKEN }}
+          DEPLOYMENT_ID: ${{ github.event.inputs.deployment_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          CLEAN_URL=$(printf "%s" "$WEBHOOK_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          CLEAN_TOKEN=$(printf "%s" "$WEBHOOK_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+          if [ -n "$CLEAN_URL" ] && [ -n "$CLEAN_TOKEN" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            if [ "$JOB_STATUS" == "success" ]; then
+              STATUS_MSG="Analyze complete"
+            else
+              STATUS_MSG="Analysis failed"
+            fi
+            PAYLOAD=$(printf '{"deploymentId":"%s","event":"progress","step":"analyze","message":"%s"}' "$DEPLOYMENT_ID" "$STATUS_MSG")
+            curl -sS -X POST "$CLEAN_URL"               -H "Content-Type: application/json"               -H "X-Devyntra-Token: $CLEAN_TOKEN"               -d "$PAYLOAD" || true
+          fi
